@@ -2,6 +2,7 @@ appname = octop
 version = 0.9.14
 display_name = Octop AI 助手
 desc = 腾讯云开源的自托管多用户多智能体 AI 助手平台（前端 React + 后端 FastAPI）。本包以 Docker 方式部署，自动同步上游 TencentCloud/Octop 源码并安装全部附加组件（browser 浏览器自动化 + desktop 桌面控制）。支持在安装向导中配置管理员账号/密码、日志级别与 LLM 密钥，数据持久化保存于共享目录。<br/><br/><strong>核心能力：</strong><br/>• 多用户、多专家智能体团队<br/>• 内置 Web 控制台（React）、CLI 与 IM 集成<br/>• 连接器生态：腾讯文档/会议/微云、百度地图、携程问道等<br/>• 可插拔后端（本地磁盘 / PostgreSQL / COS / S3）<br/>• 浏览器自动化（Playwright）+ 桌面控制（desktop 附加组件）<br/><br/><strong>默认访问：</strong>http://&lt;设备IP&gt;:8088 ，初始账号 admin / 密码 octop（安装向导可修改）。
+platform = x86
 arch = x86_64
 source = thirdparty
 maintainer = TencentCloud OrcaKit

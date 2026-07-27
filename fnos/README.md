@@ -41,7 +41,7 @@ fnos/                       # Docker 版（docker-project）
 └── Dockerfile            # 从仓库源码构建镜像，安装全部附加组件（browser + desktop）
 
 fnos-native/                # 本地版（非 Docker 的 FnOS 原生 app）
-├── manifest              # platform=all + 原生 app 元信息
+├── manifest              # platform=x86 + arch=x86_64 + 原生 app 元信息
 ├── cmd/                  # 生命周期脚本（main / install_callback / config_callback）
 ├── config/
 │   ├── privilege         # 权限声明（root，用于补装 Chromium 系统库）
