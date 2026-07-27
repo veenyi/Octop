@@ -20,7 +20,7 @@
 
 ```
 fnos/                       # Docker 版（docker-project）
-├── manifest              # 应用元信息（platform=x86 / 名称/版本/桌面入口等）
+├── manifest              # 应用元信息（platform=all / 名称/版本/桌面入口等）
 ├── ICON.PNG / ICON_256.PNG
 ├── LICENSE               # 复用仓库根 LICENSE（MIT）
 ├── cmd/                  # 生命周期脚本（main / install_callback / config_callback 等）
@@ -28,10 +28,7 @@ fnos/                       # Docker 版（docker-project）
 │   ├── privilege         # 权限声明（docker-octop 用户）
 │   └── resource          # 资源声明（docker-project + 数据共享目录）
 ├── wizard/
-│   ├── install           # 安装向导（可配置管理员账号/密码、日志级别、LLM 密钥）
-│   ├── config            # 重新配置向导
-│   ├── uninstall
-│   └── upgrade
+│   └── install           # 安装向导（可配置管理员账号/密码、日志级别、LLM 密钥）
 ├── app/
 │   ├── docker/
 │   │   └── docker-compose.yaml   # 引用 ghcr.io/veenyi/octop:latest
@@ -41,7 +38,7 @@ fnos/                       # Docker 版（docker-project）
 └── Dockerfile            # 从仓库源码构建镜像，安装全部附加组件（browser + desktop）
 
 fnos-native/                # 本地版（非 Docker 的 FnOS 原生 app）
-├── manifest              # platform=x86 + 原生 app 元信息
+├── manifest              # platform=all + 原生 app 元信息
 ├── cmd/                  # 生命周期脚本（main / install_callback / config_callback）
 ├── config/
 │   ├── privilege         # 权限声明（root，用于补装 Chromium 系统库）

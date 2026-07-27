@@ -2,15 +2,19 @@
 # =============================================================================
 # 构建 Octop 飞牛 FnOS 安装包 (.fpk)
 #
-# 双层 gzip tar 格式（与官方 fnos-hermes-agent 一致）：
-#   外层 gzip(tar) 含: app.tgz, cmd/, config/, wizard/, ICON.PNG,
-#                       ICON_256.PNG, LICENSE, manifest
-#   内层 app.tgz    含: app/ 目录内容
+# 直接使用官方 fnpack CLI 打包（fnpack 在生成 .fpk 前会校验 manifest / cmd /
+# config / wizard / app 等结构，确保产物与飞牛 fnOS 安装校验完全一致）。
 #
 # 用法（在仓库根目录执行）:
 #   bash scripts/build-fpk.sh docker      # 构建 Docker 版  -> dist/octop-<ver>.fpk
 #   bash scripts/build-fpk.sh native      # 构建本地版(非Docker) -> dist/octop-native-<ver>.fpk
 #   bash scripts/build-fpk.sh             # 两个都构建
+#
+# 说明：
+#   - Linux CI 下会自动下载 fnpack-1.2.3-linux-amd64；
+#   - 本地若已存在 .verify/fnpack(.exe) 则直接复用，不再联网下载。
+#   - 版本号同时来自仓库根 pyproject.toml，并注入到 manifest 的 version 字段
+#     （manifest 采用 key=value 无空格格式，故用 `^version=` 匹配）。
 # =============================================================================
 set -euo pipefail
 
@@ -26,52 +30,73 @@ VER="$(grep -m1 '^version' "$ROOT/pyproject.toml" | sed -E 's/.*"([0-9][0-9.]*[0
 [ -n "$VER" ] || { echo "无法从 pyproject.toml 解析版本"; exit 1; }
 echo "[build-fpk] Octop 版本: $VER"
 
+# --- 获取 fnpack CLI ---
+FNPACK=""
+if [ -x "$ROOT/.verify/fnpack.exe" ]; then
+  FNPACK="$ROOT/.verify/fnpack.exe"
+elif [ -x "$ROOT/.verify/fnpack" ]; then
+  FNPACK="$ROOT/.verify/fnpack"
+else
+  OS="$(uname -s)"
+  case "$OS" in
+    Linux)  FNPACK_URL="https://static2.fnnas.com/fnpack/fnpack-1.2.3-linux-amd64" ;;
+    Darwin) FNPACK_URL="https://static2.fnnas.com/fnpack/fnpack-1.2.3-darwin-amd64" ;;
+    *)      FNPACK_URL="https://static2.fnnas.com/fnpack/fnpack-1.2.3-windows-amd64" ;;
+  esac
+  FNPACK="$TMP/fnpack"
+  echo "[build-fpk] 下载 fnpack: $FNPACK_URL"
+  curl -fsSL -o "$FNPACK" "$FNPACK_URL"
+  chmod +x "$FNPACK"
+fi
+echo "[build-fpk] 使用 fnpack: $FNPACK"
+
 mkdir -p "$OUT"
 
 build_one() {
-    local KIND="$1" PKG OUTNAME APP_INNER
-    case "$KIND" in
-        docker)
-            PKG="$ROOT/fnos"
-            OUTNAME="octop-$VER.fpk"
-            APP_INNER="docker ui"
-            ;;
-        native)
-            PKG="$ROOT/fnos-native"
-            OUTNAME="octop-native-$VER.fpk"
-            # 本地版：bin + ui；若 CI 已生成运行时则一并打包
-            APP_INNER="bin ui"
-            [ -d "$PKG/app/runtime" ] && APP_INNER="$APP_INNER runtime"
-            ;;
-        *) echo "未知类型: $KIND"; return 1 ;;
-    esac
+  local KIND="$1" PKG OUTNAME
+  case "$KIND" in
+    docker)
+      PKG="$ROOT/fnos"
+      OUTNAME="octop-$VER.fpk"
+      ;;
+    native)
+      PKG="$ROOT/fnos-native"
+      OUTNAME="octop-native-$VER.fpk"
+      ;;
+    *) echo "未知类型: $KIND"; return 1 ;;
+  esac
 
-    local BUILD="$TMP/$KIND"
-    rm -rf "$BUILD"; mkdir -p "$BUILD/cmd" "$BUILD/config" "$BUILD/wizard" "$BUILD/app"
+  local BUILD="$TMP/$KIND"
+  rm -rf "$BUILD"; mkdir -p "$BUILD"
 
-    cp -r "$PKG/cmd/." "$BUILD/cmd/"
-    cp -r "$PKG/config/." "$BUILD/config/"
-    cp -r "$PKG/wizard/." "$BUILD/wizard/"
-    cp -r "$PKG/app/." "$BUILD/app/"
-    cp "$PKG/ICON.PNG" "$PKG/ICON_256.PNG" "$PKG/LICENSE" "$BUILD/"
+  # 复制整个包目录（manifest / cmd / config / wizard / app / ICON* / LICENSE）
+  cp -r "$PKG/." "$BUILD/"
 
-    sed "s/^version = .*/version = $VER/" "$PKG/manifest" > "$BUILD/manifest"
+  # 注入版本号到 manifest（manifest 为 key=value 无空格格式）
+  sed -i.bak "s/^version=.*/version=$VER/" "$BUILD/manifest" && rm -f "$BUILD/manifest.bak"
 
-    # 内层 app.tgz
-    tar -czf "$BUILD/app.tgz" -C "$BUILD/app" $APP_INNER
+  echo "[build-fpk] fnpack 校验并打包 $KIND ..."
+  # fnpack 校验 manifest/cmd/config/wizard/app 后在当前目录生成 <appname>.fpk
+  # Windows 版 fnpack.exe 无法解析 Git-Bash 的 /c/... 路径，需转换为 Windows 原生路径。
+  local DIR="$BUILD"
+  case "$FNPACK" in
+    *.exe) DIR="$(cygpath -w -m "$BUILD")" ;;
+  esac
+  ( cd "$BUILD" && "$FNPACK" build --directory "$DIR" )
 
-    # 外层 .fpk
-    tar -czf "$OUT/$OUTNAME" -C "$BUILD" \
-        app.tgz cmd config wizard ICON.PNG ICON_256.PNG LICENSE manifest
+  local SRC
+  SRC="$(ls "$BUILD"/*.fpk 2>/dev/null | head -1)"
+  [ -n "$SRC" ] || { echo "[build-fpk] 未找到 fnpack 产物"; return 1; }
 
-    echo "[build-fpk] 产物: $OUT/$OUTNAME"
-    echo "[build-fpk] 外层内容:"
-    tar -tzf "$OUT/$OUTNAME"
+  mv "$SRC" "$OUT/$OUTNAME"
+  echo "[build-fpk] 产物: $OUT/$OUTNAME ($(stat -c%s "$OUT/$OUTNAME") bytes)"
+  echo "[build-fpk] 外层内容:"
+  tar -tzf "$OUT/$OUTNAME"
 }
 
 if [ $# -eq 0 ]; then
-    build_one docker
-    build_one native
+  build_one docker
+  build_one native
 else
-    for k in "$@"; do build_one "$k"; done
+  for k in "$@"; do build_one "$k"; done
 fi
