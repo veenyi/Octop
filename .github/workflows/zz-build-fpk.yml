@@ -161,10 +161,23 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download fpk artifacts
+      # 分别按名称下载，单个大产物（native-fpk ~560MB）单独下载比「下载全部」更稳定，
+      # 避免 GitHub artifact 服务对“全部”模式偶发 5 次重试失败。
+      - name: Download docker fpk artifact (required)
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          name: docker-fpk
+          path: artifacts/docker-fpk
+          if-no-files-found: error
+
+      - name: Download native fpk artifact (best-effort)
+        # 原生版即使下载/解压偶发失败也不阻塞发布：Docker 版始终会随 fnos-latest 提供。
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: native-fpk
+          path: artifacts/native-fpk
+          if-no-files-found: ignore
 
       - name: Stage dist
         run: |
