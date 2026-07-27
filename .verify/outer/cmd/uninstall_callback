@@ -1,5 +1,0 @@
-#!/bin/bash
-# Octop — 卸载后回调
-# 注意：FnOS 默认保留 var 与 shares 目录（用户数据），不会随卸载删除。
-# 如需彻底清理数据，请手动删除 /var/apps/octop/shares/octop。
-exit 0

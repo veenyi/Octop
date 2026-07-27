@@ -76,6 +76,9 @@ jobs:
           if-no-files-found: error
 
   native:
+    # 即使原生版构建失败也不阻塞整体发布：Docker 版（fpk）始终会发布；
+    # 原生版成功则一并附带。continue-on-error 让 needs 视为通过。
+    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -102,9 +105,11 @@ jobs:
 
       - name: Download portable Python (python-build-standalone)
         run: |
-          PYVER=cpython-3.12.5+20240828-x86_64-unknown-linux-gnu-install_only.tar.gz
+          # 20240828 这个 tag 在 astral-sh/python-build-standalone 上并不存在，
+          # 这里使用真实存在的 20260718 发布中的 3.12.13 便携版。
+          PYVER=cpython-3.12.13+20260718-x86_64-unknown-linux-gnu-install_only.tar.gz
           curl -sSL -o /tmp/py.tgz \
-            "https://github.com/indygreg/python-build-standalone/releases/download/20240828/$PYVER"
+            "https://github.com/astral-sh/python-build-standalone/releases/download/20260718/$PYVER"
           mkdir -p fnos-native/app/runtime/python
           tar -xzf /tmp/py.tgz -C fnos-native/app/runtime/python --strip-components=1
           fnos-native/app/runtime/python/bin/python3.12 --version
@@ -119,7 +124,9 @@ jobs:
           SP=${{ github.workspace }}/fnos-native/app/runtime/site-packages
           "$PY" -m pip install --upgrade pip
           "$PY" -m pip install --target="$SP" ".[desktop]"
-          "$PY" -m playwright install --with-deps chromium
+          # 只下载 Chromium 浏览器二进制到运行时目录；系统共享库（libnss3 等）
+          # 由安装回调在飞牛主机上尽力补装（见 fnos-native/cmd/install_callback）。
+          "$PY" -m playwright install chromium
 
       - name: Build native FPK
         run: bash scripts/build-fpk.sh native
@@ -135,6 +142,9 @@ jobs:
           if-no-files-found: error
 
   release:
+    # 即使原生版失败（continue-on-error）也要发布 Docker 版；
+    # 原生版成功时 artifacts/native-fpk 存在，会被一并打包进发布。
+    if: always()
     needs: [fpk, native]
     runs-on: ubuntu-latest
     steps:

@@ -89,3 +89,11 @@ scripts/dev-local-link.sh
 
 # Local agent planning docs (not for upstream)
 docs/superpowers/
+
+# build/verify artifacts
+.verify/
+.buildtmp.*
+dist/
+*.fpk
+build.log
+build.err

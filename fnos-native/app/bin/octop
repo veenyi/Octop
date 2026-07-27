@@ -7,9 +7,9 @@
 set -euo pipefail
 
 APPDEST="${TRIM_APPDEST:-/var/apps/octop-native}"
-PKGHOME="${TRIM_PKGHOME:-/var/apps/octop-native/home}"
 PKGVAR="${TRIM_PKGVAR:-/var/apps/octop-native/var}"
-DATA_DIR="${PKGHOME}/data"
+# 数据落在 FnOS 的 data-share 共享目录，升级时保留（share 名见 config/resource: octop-native）
+DATA_DIR="${APPDEST}/shares/octop-native/data"
 
 mkdir -p "$DATA_DIR" "$PKGVAR"
 
@@ -27,9 +27,9 @@ export OCTOP_DATA_DIR="$DATA_DIR"
 # 包内自包含运行时
 RUNTIME="$APPDEST/runtime"
 PY="$RUNTIME/python/bin/python3.12"
-OCTOP_CLI="$RUNTIME/site-packages/bin/octop"
 export PYTHONPATH="$RUNTIME/site-packages"
-export PATH="$RUNTIME/python/bin:$PATH"
+# 把控制台脚本目录与 python 目录都放进 PATH，直接以 `octop` 调用（与 Docker entrypoint 一致）
+export PATH="$RUNTIME/site-packages/bin:$RUNTIME/site-packages:$RUNTIME/python/bin:$PATH"
 export PLAYWRIGHT_BROWSERS_PATH="$RUNTIME/playwright-browsers"
 
 OCTOP_PORT="${OCTOP_PORT:-8088}"
@@ -40,11 +40,11 @@ mkdir -p "$OCTOP_HOME"
 # 首次初始化管理员账号（仅当数据库尚未建立）
 if [ ! -f "$OCTOP_HOME/octop.db" ]; then
     echo "[octop-native] 首次启动，正在初始化管理员账号 ..."
-    "$PY" "$OCTOP_CLI" init --yes \
+    octop init --yes \
         --admin-username "${OCTOP_ADMIN_USERNAME:-admin}" \
         --admin-password "${OCTOP_DEFAULT_PASSWORD:-octop}" \
         ${OCTOP_ADMIN_DISPLAY_NAME:+--admin-display-name "$OCTOP_ADMIN_DISPLAY_NAME"}
 fi
 
 echo "[octop-native] 正在启动 Octop，端口 $OCTOP_PORT ..."
-exec "$PY" "$OCTOP_CLI" run --host 0.0.0.0 --port "$OCTOP_PORT"
+exec octop run --host 0.0.0.0 --port "$OCTOP_PORT"
