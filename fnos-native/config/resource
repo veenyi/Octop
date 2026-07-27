@@ -1,0 +1,14 @@
+{
+    "data-share": {
+        "shares": [
+            {
+                "name": "octop-native"
+            }
+        ]
+    },
+    "usr-local-linker": {
+        "bin": [
+            "bin/octop"
+        ]
+    }
+}

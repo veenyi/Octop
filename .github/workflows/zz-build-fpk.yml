@@ -1,11 +1,11 @@
 name: Build Octop FPK + Image
 
 # 在 main 分支有更新（含上游同步推送）时：
-#   1) 从仓库源码构建 Octop Docker 镜像，推送到 GHCR（ghcr.io/veenyi/octop:latest）
-#   2) 构建飞牛 FnOS 安装包 .fpk，并以滚动发布 fnos-latest 形式提供下载
+#   image  job：从仓库源码构建 Octop Docker 镜像，推送到 GHCR（ghcr.io/veenyi/octop:latest）
+#   fpk    job：构建「Docker 版」飞牛安装包 octop-<ver>.fpk（依赖 image，确保镜像已就绪）
+#   native job：在 Linux 上自包含构建「本地版（非 Docker）」运行时（Python + 前端 + 全部附加组件 + Chromium）
+#   release job：将两个 .fpk 以滚动发布 fnos-latest 形式提供下载
 #
-# fpk job 依赖 image job：只有镜像确认推送到 GHCR 后，才会发布 .fpk 滚动发布，
-# 保证用户安装时 ghcr.io/veenyi/octop:latest 一定可用。
 # 镜像包随公开仓库默认即为 public，无需额外设置可见性。
 
 on:
@@ -65,8 +65,94 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Build FPK
-        run: bash scripts/build-fpk.sh
+      - name: Build Docker FPK
+        run: bash scripts/build-fpk.sh docker
+
+      - name: Upload docker fpk artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-fpk
+          path: dist/octop-*.fpk
+          if-no-files-found: error
+
+  native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build frontend (dashboard)
+        env:
+          NODE_OPTIONS: "--max-old-space-size=2048"
+        run: |
+          cd dashboard
+          npm ci
+          npx vite build
+
+      - name: Download portable Python (python-build-standalone)
+        run: |
+          PYVER=cpython-3.12.5+20240828-x86_64-unknown-linux-gnu-install_only.tar.gz
+          curl -sSL -o /tmp/py.tgz \
+            "https://github.com/indygreg/python-build-standalone/releases/download/20240828/$PYVER"
+          mkdir -p fnos-native/app/runtime/python
+          tar -xzf /tmp/py.tgz -C fnos-native/app/runtime/python --strip-components=1
+          fnos-native/app/runtime/python/bin/python3.12 --version
+
+      - name: Install Octop (all extras) + Playwright Chromium into runtime
+        env:
+          PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple
+          PIP_TRUSTED_HOST: mirrors.aliyun.com
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/fnos-native/app/runtime/playwright-browsers
+        run: |
+          PY=${{ github.workspace }}/fnos-native/app/runtime/python/bin/python3.12
+          SP=${{ github.workspace }}/fnos-native/app/runtime/site-packages
+          "$PY" -m pip install --upgrade pip
+          "$PY" -m pip install --target="$SP" ".[desktop]"
+          "$PY" -m playwright install --with-deps chromium
+
+      - name: Build native FPK
+        run: bash scripts/build-fpk.sh native
+
+      - name: Show native fpk size
+        run: ls -lh dist/octop-native-*.fpk
+
+      - name: Upload native fpk artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-fpk
+          path: dist/octop-native-*.fpk
+          if-no-files-found: error
+
+  release:
+    needs: [fpk, native]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download fpk artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Stage dist
+        run: |
+          mkdir -p dist
+          cp artifacts/docker-fpk/*.fpk dist/ || true
+          cp artifacts/native-fpk/*.fpk dist/ || true
+          ls -lh dist
 
       - name: Delete rolling release if exists
         env:
@@ -91,7 +177,9 @@ jobs:
           body: |
             自动构建的飞牛 FnOS 安装包，基于 Octop 源码构建，已包含全部附加组件（browser + desktop）。
             - 镜像：ghcr.io/veenyi/octop:latest
-            - 在飞牛「应用中心 → 设置 → 手动安装应用」选择本 .fpk 即可。
+            - octop-<ver>.fpk —— Docker 版（飞牛自动从 GHCR 拉取镜像运行，包仅 ~8KB）
+            - octop-native-<ver>.fpk —— 本地版（非 Docker，自带 Python 运行时 + 前端 + 全部附加组件 + Chromium，直接原生运行在飞牛主机）
+            在飞牛「应用中心 → 设置 → 手动安装应用」选择对应 .fpk 即可。
           files: dist/*.fpk
           draft: false
           prerelease: false

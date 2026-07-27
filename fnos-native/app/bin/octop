@@ -1,0 +1,50 @@
+#!/bin/bash
+#
+# Octop 本地版 — 启动器
+# 直接运行包内自包含的 Python 运行时（无需 Docker）。
+# 首次启动会用向导配置的 .env 初始化管理员账号，然后启动服务。
+#
+set -euo pipefail
+
+APPDEST="${TRIM_APPDEST:-/var/apps/octop-native}"
+PKGHOME="${TRIM_PKGHOME:-/var/apps/octop-native/home}"
+PKGVAR="${TRIM_PKGVAR:-/var/apps/octop-native/var}"
+DATA_DIR="${PKGHOME}/data"
+
+mkdir -p "$DATA_DIR" "$PKGVAR"
+
+# 加载向导配置（install_callback / config_callback 写入）
+if [ -f "$PKGVAR/.env" ]; then
+    set -a
+    . "$PKGVAR/.env"
+    set +a
+fi
+
+export HOME="$DATA_DIR"
+export OCTOP_HOME="${DATA_DIR}/.octop"
+export OCTOP_DATA_DIR="$DATA_DIR"
+
+# 包内自包含运行时
+RUNTIME="$APPDEST/runtime"
+PY="$RUNTIME/python/bin/python3.12"
+OCTOP_CLI="$RUNTIME/site-packages/bin/octop"
+export PYTHONPATH="$RUNTIME/site-packages"
+export PATH="$RUNTIME/python/bin:$PATH"
+export PLAYWRIGHT_BROWSERS_PATH="$RUNTIME/playwright-browsers"
+
+OCTOP_PORT="${OCTOP_PORT:-8088}"
+OCTOP_LOG_LEVEL="${OCTOP_LOG_LEVEL:-info}"
+
+mkdir -p "$OCTOP_HOME"
+
+# 首次初始化管理员账号（仅当数据库尚未建立）
+if [ ! -f "$OCTOP_HOME/octop.db" ]; then
+    echo "[octop-native] 首次启动，正在初始化管理员账号 ..."
+    "$PY" "$OCTOP_CLI" init --yes \
+        --admin-username "${OCTOP_ADMIN_USERNAME:-admin}" \
+        --admin-password "${OCTOP_DEFAULT_PASSWORD:-octop}" \
+        ${OCTOP_ADMIN_DISPLAY_NAME:+--admin-display-name "$OCTOP_ADMIN_DISPLAY_NAME"}
+fi
+
+echo "[octop-native] 正在启动 Octop，端口 $OCTOP_PORT ..."
+exec "$PY" "$OCTOP_CLI" run --host 0.0.0.0 --port "$OCTOP_PORT"

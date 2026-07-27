@@ -1,0 +1,11 @@
+[
+  {
+    "stepTitle": "卸载 Octop 本地版",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "<b>卸载提示</b><br>卸载将停止服务并移除应用文件；共享目录中的用户数据（/var/apps/octop-native/shares）默认保留，可手动清理。"
+      }
+    ]
+  }
+]
