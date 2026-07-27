@@ -115,15 +115,24 @@ jobs:
           fnos-native/app/runtime/python/bin/python3.12 --version
 
       - name: Install Octop (all extras) + Playwright Chromium into runtime
+        # 用官方 PyPI（GitHub runner 直连稳定），不用易超时的阿里云镜像；
+        # 用 uv 做解析/下载（远超 pip 的回溯与并行能力）；
+        # 锁定 orcakit-harness-agent==0.9.14，避免拉到更重的 0.9.15 触发 [all] 依赖大规模回溯。
         env:
-          PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple
-          PIP_TRUSTED_HOST: mirrors.aliyun.com
           PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/fnos-native/app/runtime/playwright-browsers
+          PYTHONPATH: ${{ github.workspace }}/fnos-native/app/runtime/site-packages
+          PIP_NO_INDEX: "0"
+          UV_DEFAULT_INDEX: "https://pypi.org/simple"
+          UV_PYTHON_INSTALL_DIR: ${{ github.workspace }}/.uv-python
         run: |
           PY=${{ github.workspace }}/fnos-native/app/runtime/python/bin/python3.12
           SP=${{ github.workspace }}/fnos-native/app/runtime/site-packages
-          "$PY" -m pip install --upgrade pip
-          "$PY" -m pip install --target="$SP" ".[desktop]"
+          mkdir -p "$SP"
+          "$PY" -m pip install --quiet --upgrade pip
+          "$PY" -m pip install --quiet uv
+          printf 'orcakit-harness-agent==0.9.14\n' > /tmp/constraints.txt
+          "$PY" -m uv pip install --python "$PY" --target "$SP" --no-cache \
+            --constraint /tmp/constraints.txt ".[desktop]"
           # 只下载 Chromium 浏览器二进制到运行时目录；系统共享库（libnss3 等）
           # 由安装回调在飞牛主机上尽力补装（见 fnos-native/cmd/install_callback）。
           "$PY" -m playwright install chromium
