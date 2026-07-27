@@ -2,13 +2,8 @@
     "data-share": {
         "shares": [
             {
-                "name": "octop-native"
+                "name": "octop-native/data"
             }
-        ]
-    },
-    "usr-local-linker": {
-        "bin": [
-            "bin/octop"
         ]
     }
 }

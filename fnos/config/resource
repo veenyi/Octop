@@ -10,16 +10,7 @@
     "data-share": {
         "shares": [
             {
-                "name": "octop",
-                "permission": {
-                    "rw": ["docker-octop"]
-                }
-            },
-            {
-                "name": "octop/data",
-                "permission": {
-                    "rw": ["docker-octop"]
-                }
+                "name": "octop/data"
             }
         ]
     }
