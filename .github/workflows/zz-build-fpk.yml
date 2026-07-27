@@ -4,8 +4,9 @@ name: Build Octop FPK + Image
 #   1) 从仓库源码构建 Octop Docker 镜像，推送到 GHCR（ghcr.io/veenyi/octop:latest）
 #   2) 构建飞牛 FnOS 安装包 .fpk，并以滚动发布 fnos-latest 形式提供下载
 #
-# 两个 job 互相独立：即使镜像构建因资源受限失败，.fpk 仍会产出并发布
-# （此时用户需自行构建镜像，或等待镜像 job 重试成功）。
+# fpk job 依赖 image job：只有镜像确认推送到 GHCR 后，才会发布 .fpk 滚动发布，
+# 保证用户安装时 ghcr.io/veenyi/octop:latest 一定可用。
+# 镜像包随公开仓库默认即为 public，无需额外设置可见性。
 
 on:
   push:
@@ -56,15 +57,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Make image public
-        run: |
-          curl -sS -X PUT \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/user/packages/container/octop/visibility \
-            -d '{"visibility":"public"}' || true
-
   fpk:
+    needs: image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
