@@ -1,0 +1,105 @@
+name: Build Octop FPK + Image
+
+# 在 main 分支有更新（含上游同步推送）时：
+#   1) 从仓库源码构建 Octop Docker 镜像，推送到 GHCR（ghcr.io/veenyi/octop:latest）
+#   2) 构建飞牛 FnOS 安装包 .fpk，并以滚动发布 fnos-latest 形式提供下载
+#
+# 两个 job 互相独立：即使镜像构建因资源受限失败，.fpk 仍会产出并发布
+# （此时用户需自行构建镜像，或等待镜像 job 重试成功）。
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: build-octop
+  cancel-in-progress: false
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read version
+        id: ver
+        run: |
+          VER=$(grep -m1 '^version' pyproject.toml | sed -E 's/.*"([0-9][0-9.]*[0-9])".*/\1/')
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: fnos/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/veenyi/octop:latest
+            ghcr.io/veenyi/octop:v${{ steps.ver.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Make image public
+        run: |
+          curl -sS -X PUT \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/user/packages/container/octop/visibility \
+            -d '{"visibility":"public"}' || true
+
+  fpk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build FPK
+        run: bash scripts/build-fpk.sh
+
+      - name: Delete rolling release if exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=fnos-latest
+          REL_ID=$(curl -sS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/veenyi/Octop/releases/tags/$TAG \
+            | python -c "import sys,json;d=json.load(sys.stdin);print(d.get('id',''))" 2>/dev/null || true)
+          if [ -n "$REL_ID" ]; then
+            curl -sS -X DELETE -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/veenyi/Octop/releases/$REL_ID || true
+          fi
+          curl -sS -X DELETE -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/veenyi/Octop/git/refs/tags/$TAG || true
+
+      - name: Publish rolling release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: fnos-latest
+          name: Octop (FnOS) latest
+          body: |
+            自动构建的飞牛 FnOS 安装包，基于 Octop 源码构建，已包含全部附加组件（browser + desktop）。
+            - 镜像：ghcr.io/veenyi/octop:latest
+            - 在飞牛「应用中心 → 设置 → 手动安装应用」选择本 .fpk 即可。
+          files: dist/*.fpk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

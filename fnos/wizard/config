@@ -1,0 +1,43 @@
+[
+    {
+        "stepTitle": "Octop 重新配置",
+        "items": [
+            {
+                "type": "tips",
+                "helpText": "<b>重新配置 Octop</b><br>更新以下参数后，应用中心会重建容器生效。修改管理员密码/账号仅影响<strong>尚未初始化</strong>的数据库。"
+            },
+            {
+                "type": "text",
+                "field": "admin_username",
+                "label": "管理员账号",
+                "initValue": "admin",
+                "rules": { "required": true, "message": "请输入管理员账号" }
+            },
+            {
+                "type": "password",
+                "field": "admin_password",
+                "label": "管理员密码",
+                "rules": { "required": true, "min": 6, "message": "密码至少 6 位" }
+            },
+            {
+                "type": "select",
+                "field": "log_level",
+                "label": "日志级别",
+                "options": ["info", "debug", "warning"],
+                "initValue": "info"
+            },
+            {
+                "type": "password",
+                "field": "openai_api_key",
+                "label": "OpenAI API Key（可选）",
+                "initValue": ""
+            },
+            {
+                "type": "password",
+                "field": "dashscope_api_key",
+                "label": "通义千问 DashScope Key（可选）",
+                "initValue": ""
+            }
+        ]
+    }
+]

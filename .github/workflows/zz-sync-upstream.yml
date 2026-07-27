@@ -1,0 +1,57 @@
+name: Sync upstream Octop
+
+# 自动把上游 TencentCloud/Octop 的更新同步到本仓库（飞牛打包仓）。
+# - 每 6 小时定时检查一次
+# - 也可在 Actions 页面手动触发（workflow_dispatch）
+# 同步使用本仓库自带的 GITHUB_TOKEN 推送，无需额外 PAT。
+
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync from TencentCloud/Octop
+        run: |
+          git remote add upstream https://github.com/TencentCloud/Octop.git \
+            || git remote set-url upstream https://github.com/TencentCloud/Octop.git
+          git fetch upstream --tags
+
+          BEFORE=$(git rev-parse HEAD)
+
+          # 以 upstream 为准解决可能的冲突（-X theirs），同时保留本仓新增的
+          # fnos/ 目录与 .github/workflows/zz-* 工作流（它们不与上游路径冲突）。
+          if ! git merge -X theirs upstream/main --no-edit; then
+            echo "合并出现无法自动解决的冲突，已中止本次同步（下次重试）。"
+            git merge --abort || true
+            exit 0
+          fi
+
+          AFTER=$(git rev-parse HEAD)
+          if [ "$BEFORE" != "$AFTER" ]; then
+            git push origin main
+            echo "✅ 已同步上游更新并推送到 main。"
+          else
+            echo "✅ 已是最新，无需推送。"
+          fi
