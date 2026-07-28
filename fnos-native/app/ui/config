@@ -3,10 +3,11 @@
         "octop-native.Application": {
             "title": "Octop AI 助手",
             "icon": "images/icon_{0}.png",
-            "type": "url",
-            "protocol": "http",
-            "port": "8088",
-            "url": "/",
+            "type": "iframe",
+            "protocol": "",
+            "gatewayPrefix": "/app/octop-native",
+            "gatewaySocket": "app.sock",
+            "url": "/app/octop-native",
             "allUsers": true
         }
     }

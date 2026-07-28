@@ -8,8 +8,13 @@ set -euo pipefail
 
 APPDEST="${TRIM_APPDEST:-/var/apps/octop-native}"
 PKGVAR="${TRIM_PKGVAR:-/var/apps/octop-native/var}"
-# 数据落在 FnOS 的 data-share 共享目录，升级时保留（share 名见 config/resource: octop-native）
-DATA_DIR="${APPDEST}/shares/octop-native/data"
+# 数据落在 FnOS 的 data-share 共享目录，升级时保留。
+# 飞牛通过 TRIM_DATA_SHARE_PATHS 把 data-share 路径暴露给应用（冒号分隔多个）。
+if [ -n "${TRIM_DATA_SHARE_PATHS:-}" ]; then
+    DATA_DIR="${TRIM_DATA_SHARE_PATHS%%:*}"
+else
+    DATA_DIR="${APPDEST}/shares/octop-native/data"
+fi
 
 mkdir -p "$DATA_DIR" "$PKGVAR"
 
@@ -60,5 +65,8 @@ if [ ! -f "$OCTOP_HOME/octop.db" ]; then
         ${OCTOP_ADMIN_DISPLAY_NAME:+--admin-display-name "$OCTOP_ADMIN_DISPLAY_NAME"}
 fi
 
-echo "[octop-native] 正在启动 Octop，端口 $OCTOP_PORT ..."
-exec octop_cmd run --host 0.0.0.0 --port "$OCTOP_PORT"
+# 本地版通过飞牛统一网关访问：Octop 监听本地 TCP 端口，
+# cmd/main 另启动一个 Unix Socket 代理（app.sock）把网关请求转发过来。
+OCTOP_BIND_HOST="${OCTOP_BIND_HOST:-127.0.0.1}"
+echo "[octop-native] 正在启动 Octop，$OCTOP_BIND_HOST:$OCTOP_PORT ..."
+exec octop_cmd run --host "$OCTOP_BIND_HOST" --port "$OCTOP_PORT"

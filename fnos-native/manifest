@@ -1,13 +1,12 @@
 appname=octop-native
 version=0.9.14
 display_name=Octop AI 助手（本地版）
-desc=腾讯云开源的自托管多用户多智能体 AI 助手平台。非 Docker 本地版，直接运行在飞牛主机上，内置自包含 Python 运行时与全部附加组件。安装向导可配置管理员账号/密码、日志级别与 LLM 密钥。默认访问：http://设备IP:8088，初始账号 admin / 密码 octop。首次启动需要联网完成初始化。
+desc=腾讯云开源的自托管多用户多智能体 AI 助手平台。非 Docker 本地版，直接运行在飞牛主机上，内置自包含 Python 运行时与全部附加组件（browser + desktop）。安装向导可配置管理员账号/密码、日志级别与 LLM 密钥。点击桌面图标即可访问，初始账号 admin / 密码 octop。首次启动需要联网完成初始化。
 source=thirdparty
 platform=all
 maintainer=TencentCloud OrcaKit
 distributor=veenyi
 desktop_uidir=ui
 desktop_applaunchname=octop-native.Application
-service_port=8088
-checkport=true
 ctl_stop=true
+os_min_version=1.1.3100
