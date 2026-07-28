@@ -90,4 +90,4 @@ if [ ! -f "$OCTOP_HOME/octop.db" ]; then
 fi
 
 echo "[octop-native] 正在启动 Octop，$OCTOP_BIND_HOST:$OCTOP_PORT ..."
-exec octop_cmd run --host "$OCTOP_BIND_HOST" --port "$OCTOP_PORT"
+exec "$PY" -m octop.cli.main run --host "$OCTOP_BIND_HOST" --port "$OCTOP_PORT" --log-level "${OCTOP_LOG_LEVEL}"
