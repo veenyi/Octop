@@ -82,6 +82,8 @@ jobs:
     # 原生版成功则一并附带。continue-on-error 让 needs 视为通过。
     continue-on-error: true
     runs-on: ubuntu-latest
+    outputs:
+      native_ok: ${{ steps.build_native.outcome == 'success' && steps.upload_native.outcome == 'success' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -109,9 +111,12 @@ jobs:
           ls -lh octop-*.whl
 
       - name: Install Octop core into app/site-packages (no Chromium, no preinstalled skills)
+        id: install_core
         env:
           UV_PYTHON_INSTALL_DIR: ${{ github.workspace }}/.uv-python
         run: |
+          set -x
+          exec 1> >(tee -a "${{ github.workspace }}/native-install.log") 2>&1
           mkdir -p "${{ github.workspace }}/fnos-native/app/site-packages"
           # 用 uv 安装核心 whl 及其依赖到包内 site-packages。
           # pip 对 orcakit-harness-agent[all] 的复杂依赖树会报 resolution-too-deep，
@@ -128,12 +133,12 @@ jobs:
           # 第二步：强制覆盖为仓库 uv.lock 锁定的兼容组合 mcp==1.28.1 + langchain-mcp-adapters==0.3.0。
           # mcp 2.0 移除了 mcp.server.fastmcp / mcp.shared.context.RequestContext 等符号，
           # 而 langchain-mcp-adapters 0.3.x 仍硬导入它们，导致 octop 启动即 ImportError。
-          # 用 --no-deps --force-reinstall 单独钉版，避免再次触发 resolution 冲突；
           # 先清掉旧版目录，防止多版本共存导致 Python 仍加载坏的 mcp 2.0。
           rm -rf "$SP/mcp" "$SP"/mcp-*.dist-info \
                  "$SP/langchain_mcp_adapters" "$SP"/langchain_mcp_adapters-*.dist-info
-          python3 -m uv pip install --python python3.12 \
-            --target "$SP" --no-deps --no-cache --force-reinstall \
+          # 在 target 模式下 uv 的 --force-reinstall 行为与 pip 不同，且 CI 日志不可见，
+          # 这里改用 pip 完成钉版（pip 对 --target --force-reinstall --no-deps 更稳定）。
+          python3.12 -m pip install --target "$SP" --no-deps --no-cache-dir --force-reinstall \
             "mcp==1.28.1" "langchain-mcp-adapters==0.3.0"
           # 把核心 whl 也内置进去，供飞牛主机离线重装/回滚使用。
           cp octop-*.whl "$SP/octop.whl"
@@ -144,17 +149,27 @@ jobs:
             -c "from octop.launch import run_foreground_blocking; import mcp, langchain_mcp_adapters; print('octop', octop.__version__, '| mcp', mcp.__version__, '| lcma', langchain_mcp_adapters.__version__)"
 
       - name: Build native FPK
+        id: build_native
         run: bash scripts/build-fpk.sh native
 
       - name: Show native fpk size
         run: ls -lh dist/octop-native-*.fpk
 
       - name: Upload native fpk artifact
+        id: upload_native
         uses: actions/upload-artifact@v4
         with:
           name: native-fpk
           path: dist/octop-native-*.fpk
           if-no-files-found: error
+
+      - name: Upload native install log (for debugging)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-install-log
+          path: native-install.log
+          if-no-files-found: ignore
 
   release:
     # 即使原生版失败（continue-on-error）也要发布 Docker 版；
