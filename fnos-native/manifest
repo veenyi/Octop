@@ -8,6 +8,3 @@ maintainer=TencentCloud OrcaKit
 distributor=veenyi
 desktop_uidir=ui
 desktop_applaunchname=octop-native.Application
-service_port=8089
-checkport=true
-ctl_stop=true
