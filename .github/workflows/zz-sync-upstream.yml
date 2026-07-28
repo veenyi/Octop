@@ -3,7 +3,11 @@ name: Sync upstream Octop
 # 自动把上游 TencentCloud/Octop 的更新同步到本仓库（飞牛打包仓）。
 # - 每 6 小时定时检查一次
 # - 也可在 Actions 页面手动触发（workflow_dispatch）
-# 同步使用本仓库自带的 GITHUB_TOKEN 推送，无需额外 PAT。
+# 同步成功并 push 后，会自动触发「Build Octop FPK + Image」工作流，
+# 完成双环境（Docker + 本地版）的重新打包与发布。
+#
+# 注意：用 GITHUB_TOKEN 推送不会自动触发其它 workflow，因此最后一步
+# 显式调用 gh workflow run 触发构建。
 
 on:
   schedule:
@@ -12,6 +16,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: sync-upstream
@@ -33,25 +38,39 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Sync from TencentCloud/Octop
+        id: sync
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git remote add upstream https://github.com/TencentCloud/Octop.git \
             || git remote set-url upstream https://github.com/TencentCloud/Octop.git
-          git fetch upstream --tags
 
           BEFORE=$(git rev-parse HEAD)
 
-          # 以 upstream 为准解决可能的冲突（-X theirs），同时保留本仓新增的
-          # fnos/ 目录与 .github/workflows/zz-* 工作流（它们不与上游路径冲突）。
-          if ! git merge -X theirs upstream/main --no-edit; then
+          # 用 FETCH_HEAD 可靠引用上游 main，避免 remote-tracking ref 未创建导致 merge 失败。
+          git fetch upstream main
+
+          if ! git merge -X theirs FETCH_HEAD --no-edit; then
             echo "合并出现无法自动解决的冲突，已中止本次同步（下次重试）。"
             git merge --abort || true
+            echo "synced=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           AFTER=$(git rev-parse HEAD)
           if [ "$BEFORE" != "$AFTER" ]; then
             git push origin main
+            echo "synced=true" >> "$GITHUB_OUTPUT"
             echo "✅ 已同步上游更新并推送到 main。"
           else
+            echo "synced=false" >> "$GITHUB_OUTPUT"
             echo "✅ 已是最新，无需推送。"
           fi
+
+      - name: Trigger build & release
+        if: steps.sync.outputs.synced == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "同步到新提交，触发双环境构建与发布 ..."
+          gh workflow run zz-build-fpk.yml

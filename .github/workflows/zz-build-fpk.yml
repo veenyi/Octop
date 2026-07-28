@@ -85,28 +85,25 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Node 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Build frontend (dashboard)
-        env:
-          NODE_OPTIONS: "--max-old-space-size=2048"
+      - name: Read version
+        id: ver
         run: |
-          cd dashboard
-          npm ci
-          npx vite build
+          VER=$(grep -m1 '^version' pyproject.toml | sed -E 's/.*"([0-9][0-9.]*[0-9])".*/\1/')
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Download official Octop core wheel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER=${{ steps.ver.outputs.version }}
+          echo "Downloading official Octop core wheel v${VER} ..."
+          gh release download "v${VER}" --repo TencentCloud/Octop \
+            --pattern "octop-${VER}-py3-none-any.whl" --clobber
+          ls -lh octop-*.whl
 
       - name: Download portable Python (python-build-standalone)
         run: |
-          # 20240828 这个 tag 在 astral-sh/python-build-standalone 上并不存在，
-          # 这里使用真实存在的 20260718 发布中的 3.12.13 便携版。
+          # 使用真实存在的 20260718 发布中的 3.12.13 便携版。
           PYVER=cpython-3.12.13+20260718-x86_64-unknown-linux-gnu-install_only.tar.gz
           curl -sSL -o /tmp/py.tgz \
             "https://github.com/astral-sh/python-build-standalone/releases/download/20260718/$PYVER"
@@ -114,28 +111,17 @@ jobs:
           tar -xzf /tmp/py.tgz -C fnos-native/app/runtime/python --strip-components=1
           fnos-native/app/runtime/python/bin/python3.12 --version
 
-      - name: Install Octop (all extras) + Playwright Chromium into runtime
-        # 用官方 PyPI（GitHub runner 直连稳定），不用易超时的阿里云镜像；
-        # 用 uv 做解析/下载（远超 pip 的回溯与并行能力）；
-        # 锁定 orcakit-harness-agent==0.9.14，避免拉到更重的 0.9.15 触发 [all] 依赖大规模回溯。
-        env:
-          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/fnos-native/app/runtime/playwright-browsers
-          PYTHONPATH: ${{ github.workspace }}/fnos-native/app/runtime/site-packages
-          PIP_NO_INDEX: "0"
-          UV_DEFAULT_INDEX: "https://pypi.org/simple"
-          UV_PYTHON_INSTALL_DIR: ${{ github.workspace }}/.uv-python
+      - name: Install Octop core (no Chromium, no preinstalled skills)
         run: |
           PY=${{ github.workspace }}/fnos-native/app/runtime/python/bin/python3.12
-          SP=${{ github.workspace }}/fnos-native/app/runtime/site-packages
-          mkdir -p "$SP"
           "$PY" -m pip install --quiet --upgrade pip
-          "$PY" -m pip install --quiet uv
-          printf 'orcakit-harness-agent==0.9.14\n' > /tmp/constraints.txt
-          "$PY" -m uv pip install --python "$PY" --target "$SP" --no-cache \
-            --constraint /tmp/constraints.txt ".[desktop]"
-          # 只下载 Chromium 浏览器二进制到运行时目录；系统共享库（libnss3 等）
-          # 由安装回调在飞牛主机上尽力补装（见 fnos-native/cmd/install_callback）。
-          "$PY" -m playwright install chromium
+          # 仅安装核心 whl：其依赖自动从 PyPI 拉取，但不执行 playwright install chromium，
+          # 也不装 [desktop] extra。Chromium 浏览器二进制与专家/技能均留待用户在 Octop 界面
+          # 按需安装，从而把本地安装包从 ~600MB 减到 ~200MB 以内。
+          # 把 whl 一并内置到 runtime 目录，供飞牛主机离线重装/回滚使用。
+          cp octop-*.whl "${{ github.workspace }}/fnos-native/app/runtime/octop.whl"
+          "$PY" -m pip install --no-cache "$(ls octop-*.whl | head -1)"
+          "$PY" -c "import octop; print('octop', octop.__version__)"
 
       - name: Build native FPK
         run: bash scripts/build-fpk.sh native
