@@ -1,2 +1,37 @@
 #!/bin/bash
+#
+# Octop 本地版 — 卸载前回调
+# 飞牛卸载应用时默认会删除 data-share（用户数据目录），且不会询问是否保留。
+# 为防止用户数据静默丢失，这里在卸载前把数据备份到飞牛不会清理的用户存储卷
+# （/vol1/<数字> 用户主存储，例如 /vol1/1000），供日后重装自动恢复或用户手动取回。
+#
+set -uo pipefail
+
+LOG="${TRIM_TEMP_LOGFILE:-/dev/null}"
+log() { echo "[octop-native] $1" > "$LOG" 2>/dev/null || true; }
+
+SRC="/vol1/@appshare/octop-native/data"
+
+# 找用户存储卷（第一个 /vol1/<数字> 目录）；兜底落到 /var/apps 之外的安全位置
+BACKUP_BASE=""
+for d in /vol1/[0-9]*; do
+    [ -d "$d" ] && BACKUP_BASE="$d" && break
+done
+[ -z "$BACKUP_BASE" ] && BACKUP_BASE="/var"
+
+if [ -d "$SRC" ] && [ -n "$(ls -A "$SRC" 2>/dev/null)" ]; then
+    TS="$(date +%Y%m%d-%H%M%S)"
+    DEST="$BACKUP_BASE/OCTOP-data-backup-$TS"
+    mkdir -p "$DEST" 2>/dev/null || { log "无法创建备份目录 $DEST，跳过备份"; exit 0; }
+    # 复制用户数据（对话历史、文件、配置等）
+    cp -a "$SRC/." "$DEST/" 2>/dev/null || log "部分数据文件复制失败，已尽最大努力备份"
+    # 一并备份运行配置（含管理员密码/密钥），便于重装后保持一致
+    if [ -f /var/apps/octop-native/var/.env ]; then
+        cp -a /var/apps/octop-native/var/.env "$DEST/.octop-env.bak" 2>/dev/null || true
+    fi
+    log "已备份用户数据到 $DEST —— 卸载后重装 Octop 会自动尝试恢复；也可手动复制回 @appshare/octop-native/data"
+else
+    log "未找到需要备份的数据，跳过"
+fi
+
 exit 0
