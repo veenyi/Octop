@@ -41,10 +41,9 @@ echo "[octop-native] 已写入配置: $ENV_FILE" > "${TRIM_TEMP_LOGFILE:-/dev/nu
 # 校验 Python 3.12 是否存在
 find_python312() {
     for cand in \
-        /var/apps/python3.12/bin/python3.12 \
-        /var/apps/python312/bin/python3.12 \
+        /var/apps/python312/target/bin/python3.12 \
         /usr/local/bin/python3.12 \
-        /usr/bin/python3.12 \
+        /var/apps/python3.12/bin/python3.12 \
         python3.12
     do
         if command -v "$cand" >/dev/null 2>&1; then

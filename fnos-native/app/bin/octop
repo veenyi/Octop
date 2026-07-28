@@ -33,10 +33,9 @@ export OCTOP_DATA_DIR="$DATA_DIR"
 # 查找飞牛系统上的 Python 3.12（优先应用商店安装路径，再 PATH）
 find_python312() {
     for cand in \
-        /var/apps/python3.12/bin/python3.12 \
-        /var/apps/python312/bin/python3.12 \
+        /var/apps/python312/target/bin/python3.12 \
         /usr/local/bin/python3.12 \
-        /usr/bin/python3.12 \
+        /var/apps/python3.12/bin/python3.12 \
         python3.12
     do
         if command -v "$cand" >/dev/null 2>&1; then
