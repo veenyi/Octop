@@ -66,4 +66,39 @@ if ! PY="$(find_python312)"; then
 fi
 
 echo "[octop-native] 已检测到 Python 3.12: $PY" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+
+# ---------------------------------------------------------------------------
+# 让 Octop 本地版“开箱即用”：
+#   1) 给 octop-native 系统账户设置已知密码（= 向导里的管理员密码），
+#      便于工作台终端等场景使用。
+#   2) 授予 octop-native 免密码 sudo（NOPASSWD）。
+#      Octop 的远程桌面/浏览器等组件在运行时会以 octop-native 身份执行
+#      `sudo -n ...`（例如 desktop/setup.py 的 install/start/resize/uninstall），
+#      若 sudo 需要密码就会失败报 “a password is required”。
+#      这里在安装回调（root 权限）阶段一次性配好，之后用户在界面里安装
+#      远程桌面 / 在工作台终端里执行 sudo 都不再需要输入密码。
+# ---------------------------------------------------------------------------
+OCTOP_USER="octop-native"
+
+# 设置 octop-native 登录密码为向导管理员密码（若账户不存在则跳过）
+if id "$OCTOP_USER" >/dev/null 2>&1; then
+    echo "${OCTOP_USER}:${ADMIN_PASS}" | chpasswd 2>/dev/null || true
+    echo "[octop-native] 已为 ${OCTOP_USER} 设置登录密码（与管理员密码一致）" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+fi
+
+# 写入免密码 sudo 规则并做语法校验
+SUDOERS_FILE="/etc/sudoers.d/octop-native"
+cat > "$SUDOERS_FILE" <<'EOF'
+# 允许 octop-native 免密码执行任意命令（Octop 远程桌面/浏览器/工作台终端需要）
+octop-native ALL=(ALL) NOPASSWD: ALL
+EOF
+chmod 0440 "$SUDOERS_FILE"
+if command -v visudo >/dev/null 2>&1; then
+    visudo -c -f "$SUDOERS_FILE" >/dev/null 2>&1 || {
+        echo "[octop-native] 警告：sudoers 语法校验失败，已移除规则文件" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+        rm -f "$SUDOERS_FILE"
+    }
+fi
+echo "[octop-native] 已配置 ${OCTOP_USER} 免密码 sudo" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+
 exit 0
