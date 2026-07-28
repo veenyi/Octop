@@ -117,13 +117,24 @@ jobs:
           # pip 对 orcakit-harness-agent[all] 的复杂依赖树会报 resolution-too-deep，
           # uv 的回溯能力强得多（旧方案已验证）。
           python3 -m pip install --quiet uv
+          # 关键：必须钉死 mcp / langchain-mcp-adapters 版本，与仓库 uv.lock 一致。
+          # 不钉版时 uv 会重新解析到最新的 mcp==2.0.0 + langchain-mcp-adapters==0.3.1，
+          # 而这两者在结构上不兼容（mcp 2.0 移除了 mcp.server.fastmcp、mcp.shared.context.RequestContext
+          # 等 langchain-mcp-adapters 0.3.1 仍依赖的符号），导致 octop 主进程启动即 ImportError 崩溃。
+          # uv.lock 锁定的可用组合为 mcp==1.28.1 + langchain-mcp-adapters==0.3.0。
           python3 -m uv pip install --python python3.12 \
             --target "${{ github.workspace }}/fnos-native/app/site-packages" \
-            --no-cache "$(ls octop-*.whl | head -1)"
+            --no-cache \
+            "mcp==1.28.1" \
+            "langchain-mcp-adapters==0.3.0" \
+            "$(ls octop-*.whl | head -1)"
           # 把核心 whl 也内置进去，供飞牛主机离线重装/回滚使用。
           cp octop-*.whl "${{ github.workspace }}/fnos-native/app/site-packages/octop.whl"
+          # 校验：必须能走通真正的启动导入链（octop.launch → octop.infra.server →
+          # harness_agent.mcp → langchain_mcp_adapters）。仅 import octop 不会触发该链路，
+          # 故这里显式导入启动入口，确保 mcp/langchain-mcp-adapters 组合确实可用。
           PYTHONPATH="${{ github.workspace }}/fnos-native/app/site-packages" python3.12 \
-            -c "import octop; print('octop', octop.__version__)"
+            -c "from octop.launch import run_foreground_blocking; import mcp, langchain_mcp_adapters; print('octop', octop.__version__, '| mcp', mcp.__version__, '| lcma', langchain_mcp_adapters.__version__)"
 
       - name: Build native FPK
         run: bash scripts/build-fpk.sh native
