@@ -130,20 +130,4 @@ if command -v visudo >/dev/null 2>&1; then
 fi
 echo "[octop-native] 已配置 ${OCTOP_USER} 免密码 sudo" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
 
-# ---------------------------------------------------------------------------
-# 卸载重装数据恢复：若之前卸载时自动备份过数据（见 uninstall_init），且当前
-# 数据目录为空，则把备份恢复回去，避免用户数据因卸载而丢失。
-# ---------------------------------------------------------------------------
-DATA_DIR="/vol1/@appshare/octop-native/data"
-mkdir -p "$DATA_DIR"
-backup="$(ls -dt /vol1/[0-9]*/OCTOP-data-backup-* 2>/dev/null | head -1)"
-if [ -n "$backup" ] && [ -d "$backup" ]; then
-    if [ -z "$(ls -A "$DATA_DIR" 2>/dev/null)" ]; then
-        cp -a "$backup/." "$DATA_DIR/" 2>/dev/null || true
-        echo "[octop-native] 已从卸载备份恢复数据: $backup" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
-    else
-        echo "[octop-native] 检测到历史备份 $backup，但当前数据目录非空，未覆盖" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
-    fi
-fi
-
 exit 0
