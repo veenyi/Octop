@@ -6,6 +6,7 @@ source=thirdparty
 platform=all
 maintainer=TencentCloud OrcaKit
 distributor=veenyi
+install_dep_apps=python3.12
 desktop_uidir=ui
 desktop_applaunchname=octop-native.Application
 service_port=8089
