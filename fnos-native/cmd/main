@@ -1,10 +1,8 @@
 #!/bin/bash
 #
 # Octop 本地版（原生 app）— 生命周期管理
-# 直接以进程方式运行在飞牛主机上（非 Docker）。
-# 启动 Octop 监听本地 TCP 8088，并启动 Unix Socket 代理 app.sock
-# 供飞牛统一网关转发桌面入口请求。
-# start:  启动 Octop + socket 代理（后台，写 PID 文件）
+# 直接以进程方式运行在飞牛主机上（非 Docker），监听 0.0.0.0:8089。
+# start:  启动 Octop（后台，写 PID 文件）
 # stop:   发送 SIGTERM，超时 SIGKILL
 # status: 查询进程状态
 #
@@ -15,24 +13,18 @@ APPDEST="${TRIM_APPDEST:-/var/apps/octop-native}"
 PKGVAR="${TRIM_PKGVAR:-/var/apps/octop-native/var}"
 LOG_FILE="${PKGVAR}/info.log"
 PID_FILE="${PKGVAR}/octop.pid"
-PORT="${OCTOP_PORT:-8088}"
+PORT="${OCTOP_PORT:-8089}"
 BIN="$APPDEST/bin/octop"
-PY="$APPDEST/runtime/python/bin/python3.12"
-SOCK_PROXY="$APPDEST/cmd/socket_proxy.py"
-APP_SOCK="$APPDEST/app.sock"
 
 log_msg() { echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}"; }
 
 start_process() {
     if status; then return 0; fi
     mkdir -p "${PKGVAR}"
-    log_msg "Starting Octop (native) ..."
+    log_msg "Starting Octop (native) on port ${PORT} ..."
 
-    # 清理旧 socket
-    rm -f "${APP_SOCK}"
-
-    # 启动 Octop 监听本地 TCP 端口
-    OCTOP_PORT="$PORT" OCTOP_BIND_HOST=127.0.0.1 "$BIN" --host 127.0.0.1 --port "$PORT" >> "${LOG_FILE}" 2>&1 &
+    # 启动 Octop 监听所有接口（供飞牛直接通过端口访问）
+    OCTOP_PORT="$PORT" OCTOP_BIND_HOST=0.0.0.0 "$BIN" --host 0.0.0.0 --port "$PORT" >> "${LOG_FILE}" 2>&1 &
     octop_pid=$!
 
     # 等待 Octop TCP 端口就绪（最多 30 秒）
@@ -47,32 +39,14 @@ start_process() {
         sleep 1
     done
 
-    # 启动 Unix Socket -> TCP 代理
-    "$PY" "$SOCK_PROXY" "$APP_SOCK" 127.0.0.1 "$PORT" >> "${LOG_FILE}" 2>&1 &
-    proxy_pid=$!
-
-    # 将 Octop PID 写入 PID 文件；停止时通过进程组一起杀
     printf "%s" "$octop_pid" > "${PID_FILE}"
-    # 同时记录 proxy PID 到独立文件，便于停止
-    printf "%s" "$proxy_pid" > "${PKGVAR}/socket_proxy.pid"
-
-    log_msg "Octop pid=$octop_pid, socket_proxy pid=$proxy_pid"
+    log_msg "Octop pid=$octop_pid"
     return 0
 }
 
 stop_process() {
     log_msg "Stopping Octop (native) ..."
 
-    # 停止 socket 代理
-    if [ -r "${PKGVAR}/socket_proxy.pid" ]; then
-        proxy_pid=$(head -n 1 "${PKGVAR}/socket_proxy.pid" | tr -d '[:space:]')
-        if [ -n "$proxy_pid" ] && kill -0 "$proxy_pid" 2>/dev/null; then
-            kill -TERM "$proxy_pid" 2>/dev/null || true
-        fi
-        rm -f "${PKGVAR}/socket_proxy.pid"
-    fi
-
-    # 停止 Octop 主进程
     if [ -r "${PID_FILE}" ]; then
         pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
@@ -91,7 +65,6 @@ stop_process() {
         rm -f "${PID_FILE}"
     fi
 
-    rm -f "${APP_SOCK}"
     return 0
 }
 
