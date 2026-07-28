@@ -1,9 +1,9 @@
 #!/bin/bash
 #
 # Octop 本地版 — 启动器
-# 直接运行包内自包含的便携 Python 运行时（无需 Docker）。
+# 运行在飞牛主机上，依赖飞牛应用商店提供的 Python 3.12（不内置 Python 运行时）。
+# 包内仅含 Octop 核心 whl + 核心依赖 site-packages；浏览器/专家/技能由用户按需安装。
 # 首次启动用向导配置的 .env 初始化管理员账号，然后启动服务。
-# 包内只内置 Octop 核心 + 便携 Python；浏览器/专家/技能由用户在 Octop 界面按需安装。
 #
 set -euo pipefail
 
@@ -11,7 +11,6 @@ APPDEST="${TRIM_APPDEST:-/var/apps/octop-native}"
 PKGVAR="${TRIM_PKGVAR:-/var/apps/octop-native/var}"
 
 # 数据落在 FnOS 的 data-share 共享目录，升级时保留。
-# 飞牛通过 TRIM_DATA_SHARE_PATHS 把 data-share 路径暴露给应用（冒号分隔多个）。
 if [ -n "${TRIM_DATA_SHARE_PATHS:-}" ]; then
     DATA_DIR="${TRIM_DATA_SHARE_PATHS%%:*}"
 else
@@ -31,22 +30,49 @@ export HOME="$DATA_DIR"
 export OCTOP_HOME="${DATA_DIR}/.octop"
 export OCTOP_DATA_DIR="$DATA_DIR"
 
-# 包内自包含便携 Python 运行时（Octop 核心已安装到该 Python 的 site-packages）
-RUNTIME="$APPDEST/runtime"
-PY="$RUNTIME/python/bin/python3.12"
-export PATH="$RUNTIME/python/bin:$PATH"
-# 内置核心 whl，供离线重装 / 兜底
-OCTOP_WHL="$RUNTIME/octop.whl"
+# 查找飞牛系统上的 Python 3.12（优先应用商店安装路径，再 PATH）
+find_python312() {
+    for cand in \
+        /var/apps/python3.12/bin/python3.12 \
+        /var/apps/python312/bin/python3.12 \
+        /usr/local/bin/python3.12 \
+        /usr/bin/python3.12 \
+        python3.12
+    do
+        if command -v "$cand" >/dev/null 2>&1; then
+            local py
+            py="$(command -v "$cand")"
+            if "$py" -c 'import sys; assert sys.version_info[:2] == (3,12)' >/dev/null 2>&1; then
+                printf '%s' "$py"
+                return 0
+            fi
+        fi
+    done
+    return 1
+}
 
-# 兜底：若便携 Python 的 site-packages 中未检测到 octop（升级异常 / 损坏等），
-# 用内置 whl 就地安装，避免用户联网下载。
+PY="$(find_python312)" || {
+    echo "[octop-native] 错误：未找到 Python 3.12。" >&2
+    echo "请先前往飞牛应用中心安装「Python 3.12」开发工具，再重新安装本应用。" >&2
+    exit 1
+}
+
+SITE_PACKAGES="$APPDEST/site-packages"
+export PYTHONPATH="${SITE_PACKAGES}${PYTHONPATH:+:${PYTHONPATH}}"
+
+# 兜底：若包内 site-packages 中未检测到 octop（升级异常 / 损坏等），
+# 用内置核心 whl 就地离线安装，避免用户联网下载。
 if ! "$PY" -c "import octop" >/dev/null 2>&1; then
-    echo "[octop-native] 未检测到已安装的 Octop，正在用内置核心 whl 安装 ..."
-    "$PY" -m pip install --no-cache --quiet "$OCTOP_WHL"
+    echo "[octop-native] 未检测到已安装的 Octop，正在用内置核心 whl 离线安装 ..."
+    "$PY" -m pip install --no-cache --no-index --find-links "$SITE_PACKAGES" "$SITE_PACKAGES/octop.whl" >/dev/null 2>&1 || {
+        echo "[octop-native] 离线安装失败，请检查网络或手动执行：$PY -m pip install $SITE_PACKAGES/octop.whl" >&2
+        exit 1
+    }
 fi
 
 OCTOP_PORT="${OCTOP_PORT:-8089}"
 OCTOP_LOG_LEVEL="${OCTOP_LOG_LEVEL:-info}"
+OCTOP_BIND_HOST="${OCTOP_BIND_HOST:-0.0.0.0}"
 
 mkdir -p "$OCTOP_HOME"
 
@@ -63,6 +89,5 @@ if [ ! -f "$OCTOP_HOME/octop.db" ]; then
         ${OCTOP_ADMIN_DISPLAY_NAME:+--admin-display-name "$OCTOP_ADMIN_DISPLAY_NAME"}
 fi
 
-OCTOP_BIND_HOST="${OCTOP_BIND_HOST:-0.0.0.0}"
 echo "[octop-native] 正在启动 Octop，$OCTOP_BIND_HOST:$OCTOP_PORT ..."
 exec octop_cmd run --host "$OCTOP_BIND_HOST" --port "$OCTOP_PORT"

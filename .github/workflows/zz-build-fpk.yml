@@ -3,7 +3,9 @@ name: Build Octop FPK + Image
 # 在 main 分支有更新（含上游同步推送）时：
 #   image  job：从仓库源码构建 Octop Docker 镜像，推送到 GHCR（ghcr.io/veenyi/octop:latest）
 #   fpk    job：构建「Docker 版」飞牛安装包 octop-<ver>.fpk（依赖 image，确保镜像已就绪）
-#   native job：在 Linux 上自包含构建「本地版（非 Docker）」运行时（Python + 前端 + 全部附加组件 + Chromium）
+#   native job：构建「本地版（非 Docker）」飞牛安装包 octop-native-<ver>.fpk。
+#               不内置 Python 运行时（依赖飞牛应用商店 Python 3.12），
+#               仅内置 Octop 核心 whl + 核心依赖 site-packages，不含浏览器二进制与预装技能。
 #   release job：将两个 .fpk 以滚动发布 fnos-latest 形式提供下载
 #
 # 镜像包随公开仓库默认即为 public，无需额外设置可见性。
@@ -91,6 +93,11 @@ jobs:
           VER=$(grep -m1 '^version' pyproject.toml | sed -E 's/.*"([0-9][0-9.]*[0-9])".*/\1/')
           echo "version=$VER" >> "$GITHUB_OUTPUT"
 
+      - name: Set up Python 3.12 (build-only)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Download official Octop core wheel
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -101,32 +108,22 @@ jobs:
             --pattern "octop-${VER}-py3-none-any.whl" --clobber
           ls -lh octop-*.whl
 
-      - name: Download portable Python (python-build-standalone)
-        run: |
-          # 使用真实存在的 20260718 发布中的 3.12.13 便携版。
-          PYVER=cpython-3.12.13+20260718-x86_64-unknown-linux-gnu-install_only.tar.gz
-          curl -sSL -o /tmp/py.tgz \
-            "https://github.com/astral-sh/python-build-standalone/releases/download/20260718/$PYVER"
-          mkdir -p fnos-native/app/runtime/python
-          tar -xzf /tmp/py.tgz -C fnos-native/app/runtime/python --strip-components=1
-          fnos-native/app/runtime/python/bin/python3.12 --version
-
-      - name: Install Octop core (no Chromium, no preinstalled skills)
+      - name: Install Octop core into app/site-packages (no Chromium, no preinstalled skills)
         env:
           UV_PYTHON_INSTALL_DIR: ${{ github.workspace }}/.uv-python
         run: |
-          PY=${{ github.workspace }}/fnos-native/app/runtime/python/bin/python3.12
-          "$PY" -m pip install --quiet --upgrade pip
-          # 用 uv 做依赖解析/安装：pip 对 orcakit-harness-agent[all] 的复杂依赖树会
-          # 报 resolution-too-deep 失败，uv 的回溯能力强得多（旧方案已验证）。
-          "$PY" -m pip install --quiet uv
-          # 仅安装核心 whl：其依赖自动从 PyPI 拉取，但不执行 playwright install chromium，
-          # 也不装 [desktop] extra。Chromium 浏览器二进制与专家/技能均留待用户在 Octop 界面
-          # 按需安装，从而把本地安装包从 ~600MB 减到 ~200MB 以内。
-          # 把 whl 一并内置到 runtime 目录，供飞牛主机离线重装/回滚使用。
-          cp octop-*.whl "${{ github.workspace }}/fnos-native/app/runtime/octop.whl"
-          "$PY" -m uv pip install --python "$PY" --no-cache "$(ls octop-*.whl | head -1)"
-          "$PY" -c "import octop; print('octop', octop.__version__)"
+          mkdir -p "${{ github.workspace }}/fnos-native/app/site-packages"
+          # 用 uv 安装核心 whl 及其依赖到包内 site-packages。
+          # pip 对 orcakit-harness-agent[all] 的复杂依赖树会报 resolution-too-deep，
+          # uv 的回溯能力强得多（旧方案已验证）。
+          python3 -m pip install --quiet uv
+          python3 -m uv pip install --python python3.12 \
+            --target "${{ github.workspace }}/fnos-native/app/site-packages" \
+            --no-cache "$(ls octop-*.whl | head -1)"
+          # 把核心 whl 也内置进去，供飞牛主机离线重装/回滚使用。
+          cp octop-*.whl "${{ github.workspace }}/fnos-native/app/site-packages/octop.whl"
+          PYTHONPATH="${{ github.workspace }}/fnos-native/app/site-packages" python3.12 \
+            -c "import octop; print('octop', octop.__version__)"
 
       - name: Build native FPK
         run: bash scripts/build-fpk.sh native
