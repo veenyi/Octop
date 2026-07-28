@@ -112,15 +112,20 @@ jobs:
           fnos-native/app/runtime/python/bin/python3.12 --version
 
       - name: Install Octop core (no Chromium, no preinstalled skills)
+        env:
+          UV_PYTHON_INSTALL_DIR: ${{ github.workspace }}/.uv-python
         run: |
           PY=${{ github.workspace }}/fnos-native/app/runtime/python/bin/python3.12
           "$PY" -m pip install --quiet --upgrade pip
+          # 用 uv 做依赖解析/安装：pip 对 orcakit-harness-agent[all] 的复杂依赖树会
+          # 报 resolution-too-deep 失败，uv 的回溯能力强得多（旧方案已验证）。
+          "$PY" -m pip install --quiet uv
           # 仅安装核心 whl：其依赖自动从 PyPI 拉取，但不执行 playwright install chromium，
           # 也不装 [desktop] extra。Chromium 浏览器二进制与专家/技能均留待用户在 Octop 界面
           # 按需安装，从而把本地安装包从 ~600MB 减到 ~200MB 以内。
           # 把 whl 一并内置到 runtime 目录，供飞牛主机离线重装/回滚使用。
           cp octop-*.whl "${{ github.workspace }}/fnos-native/app/runtime/octop.whl"
-          "$PY" -m pip install --no-cache "$(ls octop-*.whl | head -1)"
+          "$PY" -m uv pip install --python "$PY" --no-cache "$(ls octop-*.whl | head -1)"
           "$PY" -c "import octop; print('octop', octop.__version__)"
 
       - name: Build native FPK
