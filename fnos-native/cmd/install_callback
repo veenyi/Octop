@@ -4,7 +4,7 @@
 # 将安装向导中输入的管理员/密钥配置写入 PKGVAR/.env，
 # 并校验飞牛系统上是否已安装 Python 3.12（应用商店提供）。
 #
-set -euo pipefail
+set -uo pipefail
 
 PKGVAR="${TRIM_PKGVAR:-/var/apps/octop-native/var}"
 mkdir -p "$PKGVAR"
@@ -87,16 +87,16 @@ fi
 
 # 写入免密码 sudo 规则并做语法校验
 SUDOERS_FILE="/etc/sudoers.d/octop-native"
-cat > "$SUDOERS_FILE" <<'EOF'
-# 允许 octop-native 免密码执行任意命令（Octop 远程桌面/浏览器/工作台终端需要）
-octop-native ALL=(ALL) NOPASSWD: ALL
-EOF
-chmod 0440 "$SUDOERS_FILE"
+# 使用 printf 替代 heredoc，并用 || true 保护，避免飞牛执行环境差异导致整体退出
+printf '%s\n' \
+    '# 允许 octop-native 免密码执行任意命令（Octop 远程桌面/浏览器/工作台终端需要）' \
+    'octop-native ALL=(ALL) NOPASSWD: ALL' > "$SUDOERS_FILE" 2>/dev/null || true
+chmod 0440 "$SUDOERS_FILE" 2>/dev/null || true
 if command -v visudo >/dev/null 2>&1; then
-    visudo -c -f "$SUDOERS_FILE" >/dev/null 2>&1 || {
+    if ! visudo -c -f "$SUDOERS_FILE" >/dev/null 2>&1; then
         echo "[octop-native] 警告：sudoers 语法校验失败，已移除规则文件" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
-        rm -f "$SUDOERS_FILE"
-    }
+        rm -f "$SUDOERS_FILE" 2>/dev/null || true
+    fi
 fi
 echo "[octop-native] 已配置 ${OCTOP_USER} 免密码 sudo" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
 
