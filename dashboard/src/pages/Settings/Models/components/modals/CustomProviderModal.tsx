@@ -24,7 +24,7 @@ import { request } from "../../../../../api/request";
 import type { ProviderRow } from "../../useProviders";
 import { ModelMetaTags } from "../../modelMeta";
 import { enrichWizardModel } from "../../wizardModelMeta";
-import { testProviderDraft } from "../../providerApi";
+import { fetchProviderModels, testProviderDraft } from "../../providerApi";
 import styles from "../../index.module.less";
 
 interface CustomProviderModalProps {
@@ -65,6 +65,7 @@ export function CustomProviderModal({
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [fetchingModels, setFetchingModels] = useState(false);
   const [form] = Form.useForm();
   const [models, setModels] = useState<InitialModel[]>([]);
   const [adding, setAdding] = useState(false);
@@ -137,21 +138,84 @@ export function CustomProviderModal({
   const handleTest = async () => {
     try {
       const values = await form.validateFields();
-      if (models.length === 0) {
-        message.warning(t("models.testDraftNeedModel"));
-        return;
-      }
+      const kind = values.kind as string;
       const apiKey = (values.api_key as string | undefined)?.trim();
+      const baseUrl = (values.base_url as string | undefined)?.trim() || null;
+      const name = (values.name as string).trim();
+
       if (!apiKey) {
         message.warning(t("models.pleaseEnterApiKey"));
         return;
       }
+
+      // For OpenAI-compatible endpoints we can auto-discover models via /v1/models.
+      // This avoids forcing the user to type model IDs manually.
+      if (kind === "openai") {
+        setFetchingModels(true);
+        const fetchResult = await fetchProviderModels({
+          name,
+          kind,
+          api_key: apiKey,
+          base_url: baseUrl,
+        });
+
+        if (!fetchResult.ok) {
+          message.error(
+            t("models.fetchModelsFailed", {
+              error: fetchResult.error ?? "unknown",
+            }),
+          );
+          return;
+        }
+
+        const fetched = fetchResult.models ?? [];
+        if (fetched.length === 0) {
+          message.warning(t("models.fetchModelsEmpty"));
+          return;
+        }
+
+        setModels((prev) => {
+          const existingIds = new Set(prev.map((m) => m.id));
+          const additions: InitialModel[] = [];
+          for (const raw of fetched) {
+            if (existingIds.has(raw.id)) continue;
+            existingIds.add(raw.id);
+            const meta = enrichWizardModel(
+              {
+                id: raw.id,
+                name: raw.name !== raw.id ? raw.name : raw.id,
+                input: ["text"],
+              },
+              t,
+            );
+            const entry: InitialModel = {
+              id: raw.id,
+              name: raw.name !== raw.id ? raw.name : raw.id,
+              input: meta.input,
+            };
+            if (meta.reasoning) entry.reasoning = true;
+            additions.push(entry);
+          }
+          return [...prev, ...additions];
+        });
+
+        message.success(
+          t("models.fetchModelsSuccess", { count: fetched.length }),
+        );
+        return;
+      }
+
+      // Non-OpenAI providers still require a manual model entry to test against.
+      if (models.length === 0) {
+        message.warning(t("models.testDraftNeedModel"));
+        return;
+      }
       setTesting(true);
       const result = await testProviderDraft({
-        name: (values.name as string).trim(),
-        kind: values.kind as string,
+        name,
+        kind,
         api_key: apiKey,
-        base_url: (values.base_url as string | undefined)?.trim() || null,
+        base_url: baseUrl,
         model_id: models[0].id,
       });
       if (result.ok) {
@@ -175,6 +239,7 @@ export function CustomProviderModal({
       );
     } finally {
       setTesting(false);
+      setFetchingModels(false);
     }
   };
 
@@ -241,10 +306,12 @@ export function CustomProviderModal({
           <Button onClick={onClose}>{t("common.cancel")}</Button>
           <Button
             icon={<Zap size={14} />}
-            loading={testing}
+            loading={testing || fetchingModels}
             onClick={() => void handleTest()}
           >
-            {t("models.testConnection")}
+            {fetchingModels
+              ? t("models.fetchingModels")
+              : t("models.testConnection")}
           </Button>
           <Button
             type="primary"

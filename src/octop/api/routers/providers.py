@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from octop.api.deps import current_admin, current_user, get_server
 from octop.infra.agents.providers.presets import load_provider_presets
 from octop.infra.agents.providers.probe import (
+    fetch_openai_compatible_models,
     make_probe_provider_row,
     probe_provider_row,
 )
@@ -78,6 +79,14 @@ class ProviderTestDraftBody(BaseModel):
     api_key: str | None = None
     base_url: str | None = None
     model_id: str
+    extra_json: str | None = None
+
+
+class ProviderFetchModelsBody(BaseModel):
+    name: str
+    kind: str
+    api_key: str | None = None
+    base_url: str | None = None
     extra_json: str | None = None
 
 
@@ -290,6 +299,26 @@ async def admin_test_provider_draft(
         extra_json=body.extra_json,
     )
     return await probe_provider_row(row, model_id=model_id)
+
+
+@admin_router.post("/fetch-models", summary="Fetch models from an OpenAI-compatible endpoint")
+async def admin_fetch_provider_models(
+    body: ProviderFetchModelsBody,
+    _: Any = Depends(current_admin),
+) -> dict[str, Any]:
+    """Return the list of models exposed by an OpenAI-compatible provider."""
+    if body.kind != "openai":
+        return {
+            "ok": False,
+            "error": "only OpenAI-compatible providers support automatic model discovery",
+        }
+    result = await asyncio.to_thread(
+        fetch_openai_compatible_models,
+        api_key=body.api_key,
+        base_url=(body.base_url or "").strip() or None,
+        extra_json=body.extra_json,
+    )
+    return result
 
 
 async def _run_codex_device_poll(

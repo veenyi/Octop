@@ -6,6 +6,8 @@ import asyncio
 import json
 import logging
 import time
+import urllib.error
+import urllib.request
 from types import SimpleNamespace
 from typing import Any
 
@@ -102,3 +104,76 @@ async def probe_provider_row(row: Any, *, model_id: str | None = None) -> dict[s
     latency_ms = int((time.perf_counter() - started) * 1000)
     _ = getattr(result, "content", None)
     return {"ok": True, "latency_ms": latency_ms}
+
+
+def fetch_openai_compatible_models(
+    *,
+    api_key: str | None,
+    base_url: str | None,
+    extra_json: str | None = None,
+    timeout_s: float = 30.0,
+) -> dict[str, Any]:
+    """Fetch the model list from an OpenAI-compatible ``/v1/models`` endpoint.
+
+    Uses only the standard library so it works without optional HTTP clients.
+    Returns ``{"ok": True, "models": [{"id": ..., "name": ...}]}`` or
+    ``{"ok": False, "error": ...}``.
+    """
+    base = (base_url or "").strip() or "https://api.openai.com/v1"
+    # Ensure we end up with ``<base>/models`` regardless of trailing slashes.
+    url = base.rstrip("/") + "/models"
+
+    headers: dict[str, str] = {"Accept": "application/json"}
+    key = (api_key or "").strip()
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+
+    # Merge any custom headers from extra_json (e.g. third-party gateways).
+    if extra_json:
+        try:
+            extra = json.loads(extra_json)
+            if isinstance(extra, dict):
+                custom = extra.get("headers")
+                if isinstance(custom, dict):
+                    for k, v in custom.items():
+                        if isinstance(k, str) and isinstance(v, str):
+                            headers[k] = v
+        except json.JSONDecodeError:
+            pass
+
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        logger.info("fetch models failed: %s %s", exc.code, body)
+        return {"ok": False, "error": f"HTTP {exc.code}: {body or exc.reason}"}
+    except Exception as exc:
+        logger.info("fetch models failed: %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+    entries = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(entries, list):
+        return {"ok": False, "error": "unexpected response format from /v1/models"}
+
+    models: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        model_id = entry.get("id")
+        if not isinstance(model_id, str) or not model_id.strip():
+            continue
+        model_id = model_id.strip()
+        if model_id in seen:
+            continue
+        seen.add(model_id)
+        # Some providers expose a display name; fall back to id.
+        name = entry.get("name")
+        if not isinstance(name, str) or not name.strip():
+            name = model_id
+        models.append({"id": model_id, "name": name.strip()})
+
+    models.sort(key=lambda m: m["id"].lower())
+    return {"ok": True, "models": models}

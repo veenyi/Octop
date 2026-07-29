@@ -31,6 +31,36 @@ export async function testProviderDraft(
   });
 }
 
+export interface FetchedModel {
+  id: string;
+  name: string;
+}
+
+export interface FetchProviderModelsResult {
+  ok: boolean;
+  models?: FetchedModel[];
+  error?: string;
+}
+
+export async function fetchProviderModels(params: {
+  name: string;
+  kind: string;
+  api_key?: string;
+  base_url?: string | null;
+  extra_json?: string | null;
+}): Promise<FetchProviderModelsResult> {
+  return request<FetchProviderModelsResult>("/admin/providers/fetch-models", {
+    method: "POST",
+    body: JSON.stringify({
+      name: params.name,
+      kind: params.kind,
+      api_key: params.api_key?.trim() || null,
+      base_url: params.base_url?.trim() || null,
+      extra_json: params.extra_json ?? null,
+    }),
+  });
+}
+
 export async function startCodexOAuth() {
   return request<{
     state_id: string;
