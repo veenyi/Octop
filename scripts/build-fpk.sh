@@ -5,10 +5,16 @@
 # 直接使用官方 fnpack CLI 打包（fnpack 在生成 .fpk 前会校验 manifest / cmd /
 # config / wizard / app 等结构，确保产物与飞牛 fnOS 安装校验完全一致）。
 #
-# 用法（在仓库根目录执行）:
+# 用法（在仓库根目录执行):
 #   bash scripts/build-fpk.sh docker      # 构建 Docker 版  -> dist/octop-<ver>.fpk
 #   bash scripts/build-fpk.sh native      # 构建本地版(非Docker) -> dist/octop-native-<ver>.fpk
 #   bash scripts/build-fpk.sh             # 两个都构建
+#
+# 环境变量：
+#   FPK_NAME_PREFIX  输出文件名前缀，默认 "octop"
+#                    例如 FPK_NAME_PREFIX=Fnos-octop 会生成 Fnos-octop-<ver>.fpk
+#   FPK_ITER         迭代号，默认空
+#                    例如 FPK_ITER=01 会生成 ...-<ver>-01.fpk
 #
 # 说明：
 #   - Linux CI 下会自动下载 fnpack-1.2.3-linux-amd64；
@@ -29,6 +35,14 @@ trap cleanup EXIT
 VER="$(grep -m1 '^version' "$ROOT/pyproject.toml" | sed -E 's/.*"([0-9][0-9.]*[0-9])".*/\1/')"
 [ -n "$VER" ] || { echo "无法从 pyproject.toml 解析版本"; exit 1; }
 echo "[build-fpk] Octop 版本: $VER"
+
+# 输出文件名前缀与迭代号（由 CI 传入，实现 Fnos-octop-0.9.16-01.fpk 风格）
+PREFIX="${FPK_NAME_PREFIX:-octop}"
+ITER_SUFFIX=""
+if [ -n "${FPK_ITER:-}" ]; then
+  ITER_SUFFIX="-$FPK_ITER"
+fi
+echo "[build-fpk] 包名前缀: $PREFIX, 迭代后缀: ${ITER_SUFFIX:-<none>}"
 
 # --- 获取 fnpack CLI ---
 FNPACK=""
@@ -57,11 +71,11 @@ build_one() {
   case "$KIND" in
     docker)
       PKG="$ROOT/fnos"
-      OUTNAME="octop-$VER.fpk"
+      OUTNAME="${PREFIX}-${VER}${ITER_SUFFIX}.fpk"
       ;;
     native)
       PKG="$ROOT/fnos-native"
-      OUTNAME="octop-native-$VER.fpk"
+      OUTNAME="${PREFIX}-native-${VER}${ITER_SUFFIX}.fpk"
       ;;
     *) echo "未知类型: $KIND"; return 1 ;;
   esac

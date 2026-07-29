@@ -2,11 +2,13 @@ name: Build Octop FPK + Image
 
 # 在 main 分支有更新（含上游同步推送）时：
 #   image  job：从仓库源码构建 Octop Docker 镜像，推送到 GHCR（ghcr.io/veenyi/octop:latest）
-#   fpk    job：构建「Docker 版」飞牛安装包 octop-<ver>.fpk（依赖 image，确保镜像已就绪）
-#   native job：构建「本地版（非 Docker）」飞牛安装包 octop-native-<ver>.fpk。
+#   fpk    job：构建「Docker 版」飞牛安装包 Fnos-octop-<ver>-<iter>.fpk（依赖 image，确保镜像已就绪）
+#   native job：构建「本地版（非 Docker）」飞牛安装包 Fnos-octop-native-<ver>-<iter>.fpk。
 #               不内置 Python 运行时（依赖飞牛应用商店 Python 3.12），
 #               仅内置 Octop 核心 whl + 核心依赖 site-packages，不含浏览器二进制与预装技能。
-#   release job：将两个 .fpk 以滚动发布 fnos-latest 形式提供下载
+#   release job：
+#               - 创建固定版本 release（如 fnos-0.9.16-01），保留历史、带更新日志；
+#               - 同步更新滚动 release fnos-latest，方便用户始终从同一 URL 下载最新版。
 #
 # 镜像包随公开仓库默认即为 public，无需额外设置可见性。
 
@@ -24,7 +26,56 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      iter: ${{ steps.iter.outputs.iter }}
+      tag: ${{ steps.iter.outputs.tag }}
+      pkg_ver: ${{ steps.iter.outputs.pkg_ver }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version
+        id: ver
+        run: |
+          VER=$(grep -m1 '^version' pyproject.toml | sed -E 's/.*"([0-9][0-9.]*[0-9])".*/\1/')
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Compute iteration
+        id: iter
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER=${{ steps.ver.outputs.version }}
+          # 查询已存在的 fnos-<ver>-NN tags，取最大序号 +1 作为本次迭代号
+          EXISTING=$(curl -sS -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/git/matching-refs/tags/fnos-${VER}-" \
+            | python3 -c "
+              import sys, json, re
+              data = json.load(sys.stdin)
+              refs = [r['ref'].replace('refs/tags/', '') for r in data if 'ref' in r]
+              nums = []
+              pat = re.compile(r'fnos-[0-9]+\.[0-9]+\.[0-9]+-([0-9]+)$')
+              for ref in refs:
+                  m = pat.match(ref)
+                  if m:
+                      nums.append(int(m.group(1)))
+              print(max(nums) if nums else 0)
+            " 2>/dev/null || echo "0")
+          MAX=${EXISTING:-0}
+          NEXT=$((MAX + 1))
+          ITER=$(printf "%02d" "$NEXT")
+          echo "iter=$ITER" >> "$GITHUB_OUTPUT"
+          echo "tag=fnos-${VER}-${ITER}" >> "$GITHUB_OUTPUT"
+          echo "pkg_ver=${VER}-${ITER}" >> "$GITHUB_OUTPUT"
+          echo "[version] VER=$VER, ITER=$ITER, TAG=fnos-${VER}-${ITER}"
+
   image:
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,12 +92,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Read version
-        id: ver
-        run: |
-          VER=$(grep -m1 '^version' pyproject.toml | sed -E 's/.*"([0-9][0-9.]*[0-9])".*/\1/')
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
-
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
@@ -55,12 +100,12 @@ jobs:
           push: true
           tags: |
             ghcr.io/veenyi/octop:latest
-            ghcr.io/veenyi/octop:v${{ steps.ver.outputs.version }}
+            ghcr.io/veenyi/octop:v${{ needs.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
   fpk:
-    needs: image
+    needs: [image, version]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -68,19 +113,23 @@ jobs:
           fetch-depth: 0
 
       - name: Build Docker FPK
+        env:
+          FPK_NAME_PREFIX: Fnos-octop
+          FPK_ITER: ${{ needs.version.outputs.iter }}
         run: bash scripts/build-fpk.sh docker
 
       - name: Upload docker fpk artifact
         uses: actions/upload-artifact@v4
         with:
           name: docker-fpk
-          path: dist/octop-*.fpk
+          path: dist/Fnos-octop-*.fpk
           if-no-files-found: error
 
   native:
     # 即使原生版构建失败也不阻塞整体发布：Docker 版（fpk）始终会发布；
     # 原生版成功则一并附带。continue-on-error 让 needs 视为通过。
     continue-on-error: true
+    needs: version
     runs-on: ubuntu-latest
     outputs:
       native_ok: ${{ steps.build_native.outcome == 'success' && steps.upload_native.outcome == 'success' }}
@@ -88,12 +137,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Read version
-        id: ver
-        run: |
-          VER=$(grep -m1 '^version' pyproject.toml | sed -E 's/.*"([0-9][0-9.]*[0-9])".*/\1/')
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python 3.12 (build-only)
         uses: actions/setup-python@v5
@@ -175,17 +218,20 @@ jobs:
 
       - name: Build native FPK
         id: build_native
+        env:
+          FPK_NAME_PREFIX: Fnos-octop
+          FPK_ITER: ${{ needs.version.outputs.iter }}
         run: bash scripts/build-fpk.sh native
 
       - name: Show native fpk size
-        run: ls -lh dist/octop-native-*.fpk
+        run: ls -lh dist/Fnos-octop-native-*.fpk
 
       - name: Upload native fpk artifact
         id: upload_native
         uses: actions/upload-artifact@v4
         with:
           name: native-fpk
-          path: dist/octop-native-*.fpk
+          path: dist/Fnos-octop-native-*.fpk
           if-no-files-found: error
 
       - name: Upload native install log (for debugging)
@@ -200,7 +246,7 @@ jobs:
     # 即使原生版失败（continue-on-error）也要发布 Docker 版；
     # 原生版成功时 artifacts/native-fpk 存在，会被一并打包进发布。
     if: always()
-    needs: [fpk, native]
+    needs: [fpk, native, version]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -217,7 +263,7 @@ jobs:
           if-no-files-found: error
 
       - name: Download native fpk artifact (best-effort)
-        # 原生版即使下载/解压偶发失败也不阻塞发布：Docker 版始终会随 fnos-latest 提供。
+        # 原生版即使下载/解压偶发失败也不阻塞发布：Docker 版始终会发布。
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
@@ -232,32 +278,69 @@ jobs:
           cp artifacts/native-fpk/*.fpk dist/ || true
           ls -lh dist
 
+      - name: Generate changelog
+        id: changelog
+        run: |
+          VER="${{ needs.version.outputs.version }}"
+          ITER="${{ needs.version.outputs.iter }}"
+          TAG="fnos-${VER}-${ITER}"
+          # 找上一个固定版本 tag（排除 fnos-latest）
+          PREV_TAG=$(git describe --tags --match "fnos-[0-9]*" --exclude "fnos-latest" --abbrev=0 HEAD^ 2>/dev/null || true)
+          if [ -z "$PREV_TAG" ]; then
+            PREV_TAG=$(git rev-list --max-parents=0 HEAD)
+          fi
+          echo "prev_tag=$PREV_TAG" >> "$GITHUB_OUTPUT"
+          {
+            echo "## 本次更新（v${VER}-${ITER}）"
+            echo ""
+            git log --pretty=format:"- %s" "$PREV_TAG"..HEAD || true
+            echo ""
+            echo ""
+            echo "## 安装说明"
+            echo "1. 飞牛应用中心 → 设置 → 手动安装应用，选择对应 .fpk。"
+            echo "2. Docker 版 **Fnos-octop-${VER}-${ITER}.fpk**（约 80KB）：飞牛自动从 GHCR 拉取镜像运行，镜像为 \\"ghcr.io/veenyi/octop:latest\\"。"
+            echo "3. 本地版 **Fnos-octop-native-${VER}-${ITER}.fpk**（约 200MB）：非 Docker，原生运行在飞牛主机；安装时自动关联系统 Python 3.12 开发工具；浏览器、远程桌面等附加组件在 Octop 应用内按需安装。"
+            echo ""
+            echo "---"
+            echo "固定版本请从本 Release 附件下载；最新滚动版见 [fnos-latest](https://github.com/${{ github.repository }}/releases/tag/fnos-latest)。"
+          } > /tmp/release-body.md
+          cat /tmp/release-body.md
+
+      # --- 固定版本 release：保留历史 ---
+      - name: Publish fixed release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: Octop (FnOS) v${{ needs.version.outputs.pkg_ver }}
+          body_path: /tmp/release-body.md
+          files: dist/*.fpk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # --- 滚动 release fnos-latest：始终指向最新版，只保留最新 assets ---
       - name: Delete rolling release if exists
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG=fnos-latest
           REL_ID=$(curl -sS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/veenyi/Octop/releases/tags/$TAG \
-            | python -c "import sys,json;d=json.load(sys.stdin);print(d.get('id',''))" 2>/dev/null || true)
+            https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG \
+            | python3 -c "import sys,json;print(json.load(sys.stdin).get('id',''))" 2>/dev/null || true)
           if [ -n "$REL_ID" ]; then
             curl -sS -X DELETE -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-              https://api.github.com/repos/veenyi/Octop/releases/$REL_ID || true
+              https://api.github.com/repos/${{ github.repository }}/releases/$REL_ID || true
           fi
           curl -sS -X DELETE -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/veenyi/Octop/git/refs/tags/$TAG || true
+            https://api.github.com/repos/${{ github.repository }}/git/refs/tags/$TAG || true
 
       - name: Publish rolling release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: fnos-latest
           name: Octop (FnOS) latest
-          body: |
-            自动构建的飞牛 FnOS 安装包，基于 Octop 源码构建（已做减法：不内置 Python 运行时、不预装组件）。
-            - 镜像：ghcr.io/veenyi/octop:latest
-            - octop-<ver>.fpk —— Docker 版（飞牛自动从 GHCR 拉取镜像运行，包仅 ~8KB）
-            - octop-native-<ver>.fpk —— 本地版（非 Docker，原生运行在飞牛主机；安装时自动关联系统 Python 3.12 开发工具；浏览器、远程桌面等附加组件在 Octop 应用内按需安装）
-            在飞牛「应用中心 → 设置 → 手动安装应用」选择对应 .fpk 即可。
+          body_path: /tmp/release-body.md
           files: dist/*.fpk
           draft: false
           prerelease: false
