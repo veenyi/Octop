@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Octop — 安装后回调
-# 将安装向导中输入的配置写入 docker-compose 同目录的 .env，
+# 使用固定默认配置写入 docker-compose 同目录的 .env（安装向导已移除）。
 # docker compose 会自动加载该 .env，从而完成前后端参数配置。
 #
 set -euo pipefail
@@ -39,12 +39,12 @@ free_octop_ports
 ENV_FILE="${TRIM_APPDEST:-/var/apps/octop/target}/docker/.env"
 mkdir -p "$(dirname "$ENV_FILE")"
 
-# 读取向导字段（FnOS 以 wizard_<field> 环境变量注入）
-ADMIN_USER="${wizard_admin_username:-admin}"
-ADMIN_PASS="${wizard_admin_password:-octop}"
-LOG_LEVEL="${wizard_log_level:-info}"
-OPENAI="${wizard_openai_api_key:-}"
-DASHSCOPE="${wizard_dashscope_api_key:-}"
+# 安装向导已移除，使用固定默认值（用户首次登录后可在控制台「设置」中修改）。
+ADMIN_USER="admin"
+ADMIN_PASS="octop"
+LOG_LEVEL="info"
+OPENAI=""
+DASHSCOPE=""
 
 # 去除可能破坏 .env 格式的换行/引号（安全起见）
 sanitize() { printf '%s' "$1" | tr -d '\n\r"'"'"''; }

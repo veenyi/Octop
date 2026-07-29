@@ -1,12 +1,1 @@
-[
-    {
-        "stepTitle": "Octop 安装配置",
-        "items": [
-            { "type": "text", "field": "admin_username", "label": "管理员账号", "initValue": "admin" },
-            { "type": "password", "field": "admin_password", "label": "管理员密码", "initValue": "octop123" },
-            { "type": "text", "field": "log_level", "label": "日志级别(info/debug/warning)", "initValue": "info" },
-            { "type": "password", "field": "openai_api_key", "label": "OpenAI API Key（可选）", "initValue": "" },
-            { "type": "password", "field": "dashscope_api_key", "label": "通义千问 DashScope Key（可选）", "initValue": "" }
-        ]
-    }
-]
+[]
