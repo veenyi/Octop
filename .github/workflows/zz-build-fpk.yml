@@ -100,15 +100,31 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Download official Octop core wheel
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Node.js 20 (frontend build)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: dashboard/package-lock.json
+
+      # native 包必须包含当前 fork 的源码修改（如 /admin/providers/fetch-models）。
+      # 上游 TencentCloud/Octop 的 release wheel 不包含这些修改，因此改为从当前
+      # 仓库源码构建 wheel：先构建前端产物到 src/octop/dashboard，再打包 wheel。
+      - name: Build Octop wheel from current source
         run: |
-          VER=${{ steps.ver.outputs.version }}
-          echo "Downloading official Octop core wheel v${VER} ..."
-          gh release download "v${VER}" --repo TencentCloud/Octop \
-            --pattern "octop-${VER}-py3-none-any.whl" --clobber
-          ls -lh octop-*.whl
+          set -e
+          echo "=== build frontend ==="
+          cd dashboard
+          npm ci --prefer-offline --no-audit
+          NODE_ENV=production NODE_OPTIONS="--max-old-space-size=4096" npm run build
+          cd ..
+          echo "=== frontend output ==="
+          ls -la src/octop/dashboard | head -20
+          echo "=== build wheel ==="
+          python3 -m pip install --quiet build
+          python3 -m build --wheel
+          echo "=== built wheel ==="
+          ls -lh dist/octop-*.whl
 
       - name: Install Octop core into app/site-packages (no Chromium, no preinstalled skills)
         id: install_core
@@ -132,7 +148,7 @@ jobs:
             # 注意：不能把钉版与 octop.whl 放在同一条 uv 命令里——会和 whl 的传递依赖约束
             # 发生 resolution 冲突，导致整个 native 构建失败（fdca4c6 的教训）。
             python3 -m uv pip install --python python3.12 \
-              --target "$SP" --no-cache "$(ls octop-*.whl | head -1)"
+              --target "$SP" --no-cache "$(ls dist/octop-*.whl | head -1)"
             # 第二步：强制覆盖为仓库 uv.lock 锁定的兼容组合 mcp==1.28.1 + langchain-mcp-adapters==0.3.0。
             # mcp 2.0 移除了 mcp.server.fastmcp / mcp.shared.context.RequestContext 等符号，
             # 而 langchain-mcp-adapters 0.3.x 仍硬导入它们，导致 octop 启动即 ImportError。
@@ -149,7 +165,7 @@ jobs:
               python3.12 -m zipfile -e "$whl" "$SP"
             done
             # 把核心 whl 也内置进去，供飞牛主机离线重装/回滚使用。
-            cp octop-*.whl "$SP/octop.whl"
+            cp dist/octop-*.whl "$SP/octop.whl"
             # 校验：必须能走通真正的启动导入链（octop.launch → octop.infra.server →
             # harness_agent.mcp → langchain_mcp_adapters）。仅 import octop 不会触发该链路，
             # 故这里显式导入启动入口，确保 mcp/langchain-mcp-adapters 组合确实可用。
