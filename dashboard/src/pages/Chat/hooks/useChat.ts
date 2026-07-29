@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useSyncExternalStore } from "react";
+import { useState, useCallback, useRef, useSyncExternalStore, useEffect } from "react";
 import type {
   MessageMetadata,
   TokenUsage,
