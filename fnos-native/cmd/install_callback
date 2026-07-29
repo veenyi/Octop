@@ -54,6 +54,56 @@ free_octop_ports() {
     done
 }
 
+# ---------------------------------------------------------------------------
+# 修正数据目录与 .env 的属主/权限（致命坑，曾导致服务启动即崩）：
+#   install_callback/config_callback 以 root 身份写 .env，若不显式 chown 给
+#   octop-native，文件保持 root:root、权限 600，服务（octop-native）启动时
+#   `bin/octop` 第 25 行 `. "$PKGVAR/.env"` 会 Permission denied 直接崩溃。
+#   另外若目录曾带 ACL，单纯 chmod 会把 mask 压成 ---，需 setfacl -b 清除。
+#   路径一律用 TRIM_* 变量（PKGVAR / TRIM_DATA_SHARE_PATHS），不固定 /vol1，
+#   兼容用户在 /vol3 等其它卷安装（地址会变）。
+# ---------------------------------------------------------------------------
+fix_ownership_and_perms() {
+    local pkgvar="$1" envfile="$2"
+    local octop_user="octop-native"
+    id "$octop_user" >/dev/null 2>&1 || {
+        echo "[octop-native] 警告：${octop_user} 账户不存在，跳过数据目录 chown（服务将回退以 root 运行）" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+        return 0
+    }
+
+    # 1) 应用数据目录（@appdata）与 .env 改属主为 octop-native
+    chown -R "$octop_user:$octop_user" "$pkgvar" 2>/dev/null || true
+    chmod 700 "$pkgvar" 2>/dev/null || true
+    [ -f "$envfile" ] && chmod 600 "$envfile" 2>/dev/null || true
+
+    # 2) 清除 ACL，避免 chmod 把 mask 压成 --- 导致仍读不到
+    if command -v setfacl >/dev/null 2>&1; then
+        setfacl -b "$pkgvar" 2>/dev/null || true
+        [ -f "$envfile" ] && setfacl -b "$envfile" 2>/dev/null || true
+    fi
+
+    # 3) 共享数据目录（data-share，@appshare）：确保属主 octop-native 且可进入
+    if [ -n "${TRIM_DATA_SHARE_PATHS:-}" ]; then
+        local ds="${TRIM_DATA_SHARE_PATHS%%:*}"
+        chown -R "$octop_user:$octop_user" "$ds" 2>/dev/null || true
+        # 向上找到 @appshare 下的应用共享根（如 /vol1/@appshare/octop-native），
+        # 将其属主也改回 octop-native 并放开 x 权限，否则 octop-native 进不去
+        # 自己的 data 子目录（曾出现 d--------- root:root）。
+        local share_root="$ds"
+        while [ "$share_root" != "/" ] && [ "$(basename "$(dirname "$share_root")")" != "@appshare" ]; do
+            share_root="$(dirname "$share_root")"
+        done
+        chown "$octop_user:$octop_user" "$share_root" 2>/dev/null || true
+        chmod 755 "$share_root" 2>/dev/null || true
+        if command -v setfacl >/dev/null 2>&1; then
+            setfacl -b "$share_root" 2>/dev/null || true
+            setfacl -b "$ds" 2>/dev/null || true
+        fi
+    fi
+
+    echo "[octop-native] 已修正数据目录/.env 属主与权限（${octop_user}:${octop_user}）" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+}
+
 free_octop_ports
 
 PKGVAR="${TRIM_PKGVAR:-/var/apps/octop-native/var}"
@@ -88,6 +138,10 @@ DASHSCOPE=$(sanitize "$DASHSCOPE")
 
 chmod 600 "$ENV_FILE"
 echo "[octop-native] 已写入配置: $ENV_FILE" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>/dev/null || true
+
+# 修正属主/权限：.env 与 appdata 改回 octop-native，避免服务以 octop-native 启动
+# 时 . "$PKGVAR/.env" 报 Permission denied（root 写 root 属主，低权限用户读不了）。
+fix_ownership_and_perms "$PKGVAR" "$ENV_FILE"
 
 # 校验 Python 3.12 是否存在
 find_python312() {

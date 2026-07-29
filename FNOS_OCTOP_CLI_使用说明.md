@@ -115,3 +115,35 @@ fuser 8089/tcp
 | 提示 `未找到 Python 3.12` | 飞牛应用中心 → 开发工具 → 安装「Python 3.12」，再重装 |
 | 远程桌面/浏览器安装报 `a password is required` | 飞牛终端(root) 执行 `visudo -c` 检查主 sudoers；重写 `/etc/sudoers.d/octop-native` 为 `octop-native ALL=(ALL) NOPASSWD: ALL` 并 `chmod 0440` |
 | 服务起不来 / 端口被占 | 看上「安装前的端口自检」；必要时 `fuser -k 8089/tcp` 后重装 |
+
+---
+
+## 七、已知坑：服务启动即崩（`.env` / 数据目录权限）
+
+**现象**（`info.log` 最后几行）：
+
+```
+Starting Octop (native) on port 8089 ...
+将以 octop-native 低权限用户运行 Octop 服务
+/bin/octop: line 25: /vol1/@appdata/octop-native/.env: Permission denied
+Octop process exited early
+```
+
+**根因**：安装/重新配置回调是以 **root** 身份写 `.env` 与创建数据目录的，若不去把属主改回 `octop-native`，文件会保持 `root:root`、权限 `600`，而 Web 服务是以 `octop-native` 身份启动的，读 `.env` 时直接 `Permission denied` 崩溃。共享数据目录（`@appshare/octop-native`）若被改成 `000`（root:root），`octop-native` 也进不去自己的 data 子目录。
+
+**修复（已打包进安装/重新配置回调）**：安装或重新配置时会自动 `chown -R octop-native:octop-native` 应用数据目录与 `.env`、`chmod 700` 目录 / `600` 文件，并对共享数据目录（`@appshare/<应用名>`）修正属主与 `x` 权限；同时 `setfacl -b` 清除可能把 mask 压成 `---` 的 ACL。**新包重装即可自动修复**，无需手动改。
+
+**老包/当前盒子手动解卡**（在飞牛终端以 root 执行，路径按实际卷替换 `vol1`→`vol3` 等）：
+
+```bash
+PKG=/vol1/@appdata/octop-native
+SHARE=/vol1/@appshare/octop-native
+chown -R octop-native:octop-native "$PKG"
+chmod 700 "$PKG"; chmod 600 "$PKG/.env"
+chown -R octop-native:octop-native "$SHARE"
+chmod 755 "$SHARE"
+# 若怀疑有 ACL：
+command -v setfacl >/dev/null && setfacl -b "$PKG" "$PKG/.env" "$SHARE"
+```
+
+> 路径说明：不同设备卷名不同，可能是 `/vol1`、`/vol3` 等，实际以 `TRIM_PKGVAR` / `TRIM_DATA_SHARE_PATHS` 为准（安装时封装脚本会自动取正确卷，不要硬编码 `/vol1`）。
