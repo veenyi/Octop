@@ -123,22 +123,30 @@ fi
 SUDOERS_FILE="/etc/sudoers.d/octop-native"
 cat > "$SUDOERS_FILE" <<'EOF'
 # 允许 octop-native 免密码执行任意命令（Octop 远程桌面/浏览器/工作台终端需要）
+# !requiretty：Octop 以内嵌子进程方式调用 `sudo -n ...`，没有 controlling tty；
+# 若系统 sudoers 默认开启 requiretty，这里必须显式关闭，否则会报
+# "sorry, you must have a tty to run sudo" 而让远程桌面/浏览器安装失败。
+Defaults:octop-native !requiretty
 octop-native ALL=(ALL) NOPASSWD: ALL
 EOF
 chmod 0440 "$SUDOERS_FILE"
 if command -v visudo >/dev/null 2>&1; then
-    visudo -c -f "$SUDOERS_FILE" >/dev/null 2>&1
+    if ! visudo -c -f "$SUDOERS_FILE" >/dev/null 2>&1; then
+        echo "[octop-native] 错误：写入的 sudoers 语法校验失败，请检查 ${SUDOERS_FILE}" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+        exit 1
+    fi
 fi
 echo "[octop-native] 已配置 ${OCTOP_USER} 免密码 sudo" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
 
-# 整体校验：octop-native 现在能否真正免密 sudo（会解析全部 sudoers，
-# 若系统主 /etc/sudoers 本身有语法错误，这里会暴露出来，便于排查，
-# 否则用户要等到点“安装虚拟桌面”弹 sudo 密码时才能发现）。
-if command -v sudo >/dev/null 2>&1; then
-    if sudo -n -l -U "$OCTOP_USER" >/dev/null 2>&1; then
-        echo "[octop-native] 校验通过：${OCTOP_USER} 可免密 sudo" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+# 整体校验：必须“真实执行”一次 sudo，而不仅是 `sudo -n -l -U`（后者不需要 tty，
+# 会掩盖 requiretty 问题）。以 octop-native 身份真实运行 `sudo -n id -u`，
+# 期望 stdout 为 0（uid=0）。若失败，说明 sudoers 未被包含或 requiretty 未关闭，
+# 用户点“安装虚拟桌面”时才会暴露，这里提前暴露便于排查。
+if id "$OCTOP_USER" >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
+    if su -s /bin/bash "$OCTOP_USER" -c 'sudo -n id -u' 2>/dev/null | grep -qx 0; then
+        echo "[octop-native] 校验通过：${OCTOP_USER} 可免密 sudo（真实执行 id -u 返回 0）" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
     else
-        echo "[octop-native] 警告：系统 sudoers 配置可能存在问题，${OCTOP_USER} 免密 sudo 校验未通过；若后续远程桌面报 sudo 错误，请在飞牛终端以 root 执行 visudo -c 检查 /etc/sudoers。" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+        echo "[octop-native] 警告：${OCTOP_USER} 免密 sudo 真实执行未通过（可能 /etc/sudoers.d 未包含或 requiretty 未关闭）；若后续远程桌面报 sudo 错误，请在飞牛终端以 root 执行 visudo -c 并检查 /etc/sudoers 是否 #includedir /etc/sudoers.d。" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
     fi
 fi
 

@@ -23,8 +23,22 @@ start_process() {
     mkdir -p "${PKGVAR}"
     log_msg "Starting Octop (native) on port ${PORT} ..."
 
+    # 以最低权限用户 octop-native 运行 Octop 服务（安全：web 服务与工作台终端
+    # 不以 root 身份暴露）。若该用户不存在（个别 FnOS 版本在 run-as=root 时不
+    # 创建包用户），则回退以当前身份（root）运行，保证服务一定起得来。
+    # 注意：本包 run-as=root 是为了让 install_callback 能以 root 写入
+    # /etc/sudoers.d/octop-native（授予 octop-native 免密 sudo），从而使远程桌面
+    # /浏览器安装这类需要 root 的操作可用；服务本身仍尽量降权运行。
+    local -a RUN_AS=()
+    if id octop-native >/dev/null 2>&1 && command -v runuser >/dev/null 2>&1; then
+        RUN_AS=(runuser -u octop-native --)
+        log_msg "将以 octop-native 低权限用户运行 Octop 服务"
+    else
+        log_msg "octop-native 用户不可用，回退以当前身份运行 Octop 服务"
+    fi
+
     # 启动 Octop 监听所有接口（供飞牛直接通过端口访问）
-    OCTOP_PORT="$PORT" OCTOP_BIND_HOST=0.0.0.0 "$BIN" --host 0.0.0.0 --port "$PORT" >> "${LOG_FILE}" 2>&1 &
+    OCTOP_PORT="$PORT" OCTOP_BIND_HOST=0.0.0.0 ${RUN_AS[@]+"${RUN_AS[@]}"} "$BIN" --host 0.0.0.0 --port "$PORT" >> "${LOG_FILE}" 2>&1 &
     octop_pid=$!
 
     # 等待 Octop TCP 端口就绪（最多 30 秒）
