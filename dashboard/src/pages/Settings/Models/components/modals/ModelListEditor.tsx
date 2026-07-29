@@ -229,9 +229,7 @@ export function ModelListEditor({
       if (existing) {
         entry.enabled = existing.enabled;
       }
-      onModelsChange(
-        models.map((m) => (m.id === editingModelId ? entry : m)),
-      );
+      onModelsChange(models.map((m) => (m.id === editingModelId ? entry : m)));
       message.success(t("models.modelUpdated", { name: entry.name }));
       resetForm();
     } catch (err) {

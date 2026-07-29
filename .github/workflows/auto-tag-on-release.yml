@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   tag:
@@ -61,3 +62,14 @@ jobs:
           tag="${{ steps.version.outputs.tag }}"
           git tag "$tag"
           git push origin "$tag"
+
+      # GITHUB_TOKEN tag pushes do not cascade to other workflows. Explicitly
+      # dispatch Release / Docker Publish (workflow_dispatch is exempt).
+      - name: Trigger Release and Docker Publish
+        if: steps.check_tag.outputs.should_publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ steps.version.outputs.tag }}"
+          gh workflow run release.yml --ref "$tag"
+          gh workflow run docker-publish.yml --ref "$tag"

@@ -2,7 +2,7 @@
  * CustomProviderModal — create a new custom provider.
  */
 import { useEffect, useMemo, useState } from "react";
-import { Button, Divider, Form, Input, Modal, Select, Space, message } from "antd";
+import { Button, Divider, Form, Input, Modal, Select, message } from "antd";
 import { Download, Zap } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { request } from "../../../../../api/request";
@@ -70,7 +70,12 @@ export function CustomProviderModal({
   }, [open, form]);
 
   const testDraftModel = async (modelId: string) => {
-    const values = await form.validateFields(["name", "kind", "api_key", "base_url"]);
+    const values = await form.validateFields([
+      "name",
+      "kind",
+      "api_key",
+      "base_url",
+    ]);
     const key = (values.api_key as string | undefined)?.trim();
     if (!key) {
       return { ok: false, error: t("models.pleaseEnterApiKey") };
@@ -154,7 +159,7 @@ export function CustomProviderModal({
           id: m.id,
           name: m.name,
           enabled: m.enabled,
-          input: m.input.length > 0 ? m.input : ["text"],
+          input: m.input?.length ? m.input : ["text"],
           thinking: null,
         };
         if (m.max_tokens != null) entry.max_tokens = m.max_tokens;
@@ -207,7 +212,11 @@ export function CustomProviderModal({
           <div className={styles.modalFooterLeft} />
           <div className={styles.modalFooterRight}>
             <Button onClick={onClose}>{t("common.cancel")}</Button>
-            <Button type="primary" loading={saving} onClick={() => void handleSubmit()}>
+            <Button
+              type="primary"
+              loading={saving}
+              onClick={() => void handleSubmit()}
+            >
               {t("common.create")}
             </Button>
           </div>
@@ -235,8 +244,8 @@ export function CustomProviderModal({
                 k.value === "openai"
                   ? t("models.kindOpenaiCompat")
                   : k.value === "anthropic"
-                    ? "Anthropic"
-                    : "AWS Bedrock",
+                  ? "Anthropic"
+                  : "AWS Bedrock",
             }))}
           />
         </Form.Item>
@@ -273,29 +282,55 @@ export function CustomProviderModal({
       </Form>
 
       <div style={{ marginBottom: 16 }}>
-        <Button size="small" icon={<Zap size={12} />} loading={testing} onClick={async () => {
-          try {
-            setTesting(true);
-            const modelId = models.find((m) => m.enabled !== false)?.id || models[0]?.id;
-            if (!modelId) {
-              message.warning(t("models.testDraftNeedModel"));
-              return;
+        <Button
+          size="small"
+          icon={<Zap size={12} />}
+          loading={testing}
+          onClick={async () => {
+            try {
+              setTesting(true);
+              const modelId =
+                models.find((m) => m.enabled !== false)?.id || models[0]?.id;
+              if (!modelId) {
+                message.warning(t("models.testDraftNeedModel"));
+                return;
+              }
+              const result = await testDraftModel(modelId);
+              if (result.ok) {
+                const latency =
+                  result.latency_ms != null
+                    ? t("models.testConnectionLatency", {
+                        time: result.latency_ms,
+                      })
+                    : "";
+                message.success(
+                  t("models.testConnectionSuccess", {
+                    name: (form.getFieldValue("name") as string) || "draft",
+                    latency,
+                  }),
+                );
+              } else {
+                message.error(
+                  t("models.testConnectionFailed", {
+                    error: result.error ?? "unknown",
+                  }),
+                );
+              }
+            } finally {
+              setTesting(false);
             }
-            const result = await testDraftModel(modelId);
-            if (result.ok) {
-              const latency = result.latency_ms != null ? t("models.testConnectionLatency", { time: result.latency_ms }) : "";
-              message.success(t("models.testConnectionSuccess", { name: (form.getFieldValue("name") as string) || "draft", latency }));
-            } else {
-              message.error(t("models.testConnectionFailed", { error: result.error ?? "unknown" }));
-            }
-          } finally {
-            setTesting(false);
-          }
-        }}>
+          }}
+        >
           {t("models.testConnection")}
         </Button>
         {kind === "openai" && (
-          <Button size="small" icon={<Download size={12} />} loading={fetchingModels} onClick={() => void handleFetchModels()} style={{ marginLeft: 8 }}>
+          <Button
+            size="small"
+            icon={<Download size={12} />}
+            loading={fetchingModels}
+            onClick={() => void handleFetchModels()}
+            style={{ marginLeft: 8 }}
+          >
             {t("models.fetchModels")}
           </Button>
         )}

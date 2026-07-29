@@ -20,6 +20,7 @@
   <a href="#-overview">Overview</a> ·
   <a href="#-core-technology">Core Technology</a> ·
   <a href="#-features">Features</a> ·
+  <a href="#-roadmap">Roadmap</a> ·
   <a href="#-quick-start">Quick Start</a> ·
   <a href="#-contents">Contents</a>
 </p>
@@ -118,6 +119,19 @@ Octop supports ACP in two directions:
 Built-in outbound runners include OpenCode, CodeBuddy, Claude Code, and Codex.
 
 Full setup: **[docs/acp.md](docs/acp.md)**.
+
+## 🗺️ Roadmap
+
+Here are our mid-to-long term plans:
+
+- [ ] **Shared resource pool** — a central pool of skills and sub-agents that any user can drop into a new expert without rebuilding from scratch.
+- [ ] **Expert sharing** — publish your experts to other users in the same deployment, so good configurations are reused instead of recreated.
+- [ ] **Browser & terminal polishing** — browser skill *recording* (capture a workflow and replay it as a skill) and a more capable terminal AI assistant.
+- [ ] **AgentTeams** — let one coordinator autonomously schedule and orchestrate multiple experts to tackle multi-step tasks.
+- [ ] **Self-evolution** — automatically distill everyday conversations into reusable skills, so the assistant grows with you.
+- [ ] **PC / mobile clients** — native desktop and mobile apps alongside the web dashboard and IM channels.
+
+This roadmap may shift as the community grows; treat it as indicative only.
 
 ## 🚀 Quick Start
 
@@ -242,6 +256,7 @@ See [`.env.example`](.env.example) for the full list.
   - [Project layout](#-project-layout)
   - [Development](#-development)
 - **Project Info**
+  - [Roadmap](#-roadmap)
   - [Security & privacy](#-security--privacy)
   - [Contributing](#-contributing)
   - [Changelog](#-changelog)

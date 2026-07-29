@@ -70,7 +70,9 @@ export function installChunkLoadRecovery(): void {
         target.src.includes("/assets/")
       ) {
         tryReloadOnStaleChunk(
-          new Error(`Failed to fetch dynamically imported module: ${target.src}`),
+          new Error(
+            `Failed to fetch dynamically imported module: ${target.src}`,
+          ),
         );
       }
     },

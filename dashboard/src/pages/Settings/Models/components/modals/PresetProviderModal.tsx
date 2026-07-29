@@ -7,7 +7,11 @@ import { Download, Zap } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { request } from "../../../../../api/request";
 import { enrichWizardModel } from "../../wizardModelMeta";
-import type { ProviderModel, ProviderPreset, ProviderRow } from "../../useProviders";
+import type {
+  ProviderModel,
+  ProviderPreset,
+  ProviderRow,
+} from "../../useProviders";
 import { CodexOAuthConnect } from "../CodexOAuthConnect";
 import { fetchProviderModels, testProviderDraft } from "../../providerApi";
 import { ModelListEditor } from "./ModelListEditor";
@@ -49,20 +53,32 @@ export function PresetProviderModal({
       id: 0,
       name: (form.getFieldValue("name") as string | undefined) || preset.name,
       kind: preset.protocol,
-      base_url: (form.getFieldValue("base_url") as string | undefined) || preset.base_url,
-      api_key: (form.getFieldValue("api_key") as string | undefined) || (isOllama ? "ollama" : null),
+      base_url:
+        (form.getFieldValue("base_url") as string | undefined) ||
+        preset.base_url,
+      api_key:
+        (form.getFieldValue("api_key") as string | undefined) ||
+        (isOllama ? "ollama" : null),
       models: draftModels,
       note: null,
       enabled: true,
     }),
-    [draftModels, form, isOllama, preset.base_url, preset.name, preset.protocol],
+    [
+      draftModels,
+      form,
+      isOllama,
+      preset.base_url,
+      preset.name,
+      preset.protocol,
+    ],
   );
 
   useEffect(() => {
     if (open) {
       const baseModels: ProviderModel[] = preset.models.map((m) => {
         const meta = enrichWizardModel(m, t);
-        const ctx = m.context_window ?? m.max_input_tokens ?? meta.context_window;
+        const ctx =
+          m.context_window ?? m.max_input_tokens ?? meta.context_window;
         const entry: ProviderModel = {
           id: m.id,
           name: m.name,
@@ -247,17 +263,25 @@ export function PresetProviderModal({
       cancelText={t("common.cancel")}
       destroyOnHidden
       width={640}
-      footer={isCodexOAuth ? <Button onClick={onClose}>{t("common.cancel")}</Button> : (
-        <div className={styles.modalFooter}>
-          <div className={styles.modalFooterLeft} />
-          <div className={styles.modalFooterRight}>
-            <Button onClick={onClose}>{t("common.cancel")}</Button>
-            <Button type="primary" loading={saving} onClick={() => void handleSubmit()}>
-              {t("common.create")}
-            </Button>
+      footer={
+        isCodexOAuth ? (
+          <Button onClick={onClose}>{t("common.cancel")}</Button>
+        ) : (
+          <div className={styles.modalFooter}>
+            <div className={styles.modalFooterLeft} />
+            <div className={styles.modalFooterRight}>
+              <Button onClick={onClose}>{t("common.cancel")}</Button>
+              <Button
+                type="primary"
+                loading={saving}
+                onClick={() => void handleSubmit()}
+              >
+                {t("common.create")}
+              </Button>
+            </div>
           </div>
-        </div>
-      )}
+        )
+      }
     >
       {isCodexOAuth ? (
         <CodexOAuthConnect
@@ -268,62 +292,75 @@ export function PresetProviderModal({
         />
       ) : (
         <>
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item
-            name="name"
-            label={t("models.nameLabel")}
-            rules={[{ required: true }]}
-          >
-            <Input placeholder={preset.name} />
-          </Form.Item>
+          <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
+            <Form.Item
+              name="name"
+              label={t("models.nameLabel")}
+              rules={[{ required: true }]}
+            >
+              <Input placeholder={preset.name} />
+            </Form.Item>
 
-          <Form.Item name="kind" label={t("models.kindLabel")}>
-            <Input disabled style={{ color: "var(--fn-text-secondary)" }} />
-          </Form.Item>
+            <Form.Item name="kind" label={t("models.kindLabel")}>
+              <Input disabled style={{ color: "var(--fn-text-secondary)" }} />
+            </Form.Item>
 
-          <Form.Item name="base_url" label="Base URL" extra={t("models.baseUrlExtra")}>
-            <Input placeholder={preset.base_url || "https://..."} />
-          </Form.Item>
+            <Form.Item
+              name="base_url"
+              label="Base URL"
+              extra={t("models.baseUrlExtra")}
+            >
+              <Input placeholder={preset.base_url || "https://..."} />
+            </Form.Item>
 
-          <Form.Item
-            name="api_key"
-            label="API Key"
-            rules={
-              isOllama
-                ? []
-                : [{ required: true, message: t("models.pleaseEnterApiKey") }]
-            }
-            extra={isOllama ? t("models.apiKeyExtraOptional") : undefined}
-          >
-            <Input.Password
-              placeholder={
-                isOllama ? t("models.apiKeyExtraOptional") : apiKeyPlaceholder
+            <Form.Item
+              name="api_key"
+              label="API Key"
+              rules={
+                isOllama
+                  ? []
+                  : [{ required: true, message: t("models.pleaseEnterApiKey") }]
               }
-              visibilityToggle
-            />
-          </Form.Item>
-        </Form>
+              extra={isOllama ? t("models.apiKeyExtraOptional") : undefined}
+            >
+              <Input.Password
+                placeholder={
+                  isOllama ? t("models.apiKeyExtraOptional") : apiKeyPlaceholder
+                }
+                visibilityToggle
+              />
+            </Form.Item>
+          </Form>
 
-        <div style={{ marginBottom: 16 }}>
-          <Button icon={<Zap size={14} />} loading={testing} onClick={() => void handleTest()}>
-            {t("models.testConnection")}
-          </Button>
-          <Button icon={<Download size={14} />} loading={fetchingModels} onClick={() => void handleFetchModels()} style={{ marginLeft: 8 }}>
-            {t("models.fetchModels")}
-          </Button>
-        </div>
+          <div style={{ marginBottom: 16 }}>
+            <Button
+              icon={<Zap size={14} />}
+              loading={testing}
+              onClick={() => void handleTest()}
+            >
+              {t("models.testConnection")}
+            </Button>
+            <Button
+              icon={<Download size={14} />}
+              loading={fetchingModels}
+              onClick={() => void handleFetchModels()}
+              style={{ marginLeft: 8 }}
+            >
+              {t("models.fetchModels")}
+            </Button>
+          </div>
 
-        <Divider orientation="left" style={{ fontSize: 13 }}>
-          {t("models.manageModels")}
-        </Divider>
-        <ModelListEditor
-          provider={draftProvider}
-          models={draftModels}
-          onModelsChange={setDraftModels}
-          apiPrefix="/admin/providers"
-          canTest={canTest}
-          onTestModel={(modelId) => testDraftModel(modelId)}
-        />
+          <Divider orientation="left" style={{ fontSize: 13 }}>
+            {t("models.manageModels")}
+          </Divider>
+          <ModelListEditor
+            provider={draftProvider}
+            models={draftModels}
+            onModelsChange={setDraftModels}
+            apiPrefix="/admin/providers"
+            canTest={canTest}
+            onTestModel={(modelId) => testDraftModel(modelId)}
+          />
         </>
       )}
     </Modal>
