@@ -74,6 +74,8 @@ interface MessageListProps {
   shellCommandDisabled?: boolean;
   shellCommandDisabledTitle?: string;
   compactProcess?: boolean;
+  /** True while a task is still running on the backend after the live stream dropped (e.g. phone slept / tab closed). */
+  backgroundRunning?: boolean;
 }
 
 interface GroupRenderContext {
@@ -209,6 +211,7 @@ export default function MessageList(props: MessageListProps) {
     shellCommandDisabled,
     shellCommandDisabledTitle,
     compactProcess,
+    backgroundRunning,
   } = props;
 
   const { t } = useTranslation();
@@ -596,6 +599,26 @@ export default function MessageList(props: MessageListProps) {
         <ThinkingBubble startedAt={thinkingStartedAt} onCancel={onCancel} />
       )}
       {showContinuing && <ContinuingIndicator onCancel={onCancel} />}
+      {backgroundRunning && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            padding: "12px 16px",
+            margin: "4px 12px 8px",
+            borderRadius: 12,
+            background: "rgba(22,119,255,0.08)",
+            color: "#1677ff",
+            fontSize: 13,
+            lineHeight: "20px",
+          }}
+        >
+          <Spin size="small" />
+          <span>{t("chat.backgroundRunning")}</span>
+        </div>
+      )}
       {refreshFooter}
     </>
   );
@@ -626,7 +649,7 @@ export default function MessageList(props: MessageListProps) {
             ...virtuosoComponents,
             Header: () => (historyHeader ? <div>{historyHeader}</div> : null),
             Footer: () =>
-              showThinking || showContinuing || refreshFooter ? (
+              showThinking || showContinuing || refreshFooter || backgroundRunning ? (
                 <div>{footer}</div>
               ) : null,
           }}

@@ -540,6 +540,7 @@
   "chat": {
     "thinking": "Thinking",
     "continuing": "Continuing",
+    "backgroundRunning": "Task running in the background — results will appear automatically when ready",
     "scrollToBottom": "Scroll to bottom",
     "loadingEarlierMessages": "Loading earlier messages…",
     "scrollForEarlierMessages": "Scroll up for earlier messages",

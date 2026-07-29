@@ -106,6 +106,12 @@ async def dashboard_chat_ws(
             if msg_type == "ping":
                 await send_frame({"type": "pong"})
                 continue
+            if msg_type == "cancel":
+                if active_thread_id is not None and not turn_finished:
+                    server.app_runtime.agent_registry.cancel_stream(agent_id, active_thread_id)
+                    turn_finished = True
+                    await send_frame({"type": "done"})
+                continue
             if msg_type != "user_turn":
                 await send_frame({"type": "error", "message": f"unknown message type: {msg_type}"})
                 continue
@@ -156,8 +162,12 @@ async def dashboard_chat_ws(
                 await send_frame({"type": "error", "message": "internal error"})
     finally:
         hub.unregister(connection_id)
-        if active_thread_id is not None and not turn_finished:
-            server.app_runtime.agent_registry.cancel_stream(agent_id, active_thread_id)
+        # Intentionally do NOT cancel the running harness turn here.
+        # If the WebSocket drops because the phone went to sleep or the browser
+        # was closed, the agent should keep working in the background and write
+        # its final answer to the thread checkpoint.  The dashboard will recover
+        # the result by refreshing thread history when the user comes back.
+        # User-initiated cancellation is handled by the explicit "cancel" frame.
         if websocket.application_state == WebSocketState.CONNECTED:
             with contextlib.suppress(Exception):
                 await websocket.close()

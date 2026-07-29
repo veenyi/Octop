@@ -538,6 +538,7 @@
   "chat": {
     "thinking": "正在思考",
     "continuing": "继续生成中",
+    "backgroundRunning": "任务正在后台运行，完成后将自动显示",
     "scrollToBottom": "滚动到底部",
     "loadingEarlierMessages": "正在加载更早的消息…",
     "scrollForEarlierMessages": "向上滚动加载更早的消息",

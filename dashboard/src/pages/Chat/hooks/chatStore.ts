@@ -248,6 +248,7 @@ function getOrCreate(sessionId: string): SessionStreamState {
       historyNextOffset: 0,
       historyLoadingMore: false,
       historyHydrated: false,
+      ws: null,
       listeners: new Set(),
       _snapshot: EMPTY_SNAPSHOT,
     };
@@ -436,8 +437,22 @@ export function cancelStream(sessionId: string) {
   const hadAbort = Boolean(state.abortController);
   const hadStreaming = state.isStreaming;
   const hadStreamingMsgs = state.messages.some((m) => m.status === "streaming");
+
+  // Tell the backend explicitly that this is a user-initiated cancellation.
+  // Network drops (sleep/close browser) must not cancel the turn, so the
+  // backend only stops when it receives this frame.
+  const ws = state.ws;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify({ type: "cancel" }));
+    } catch {
+      // ignore send errors; fall through to abort
+    }
+  }
+
   state.abortController?.abort();
   state.abortController = null;
+  state.ws = null;
   clearStreamingFlags(state);
   state.runUsage = null;
   if (hadStreamingMsgs) {
@@ -1115,11 +1130,13 @@ async function sendTurnWebSocket(
       resolve(false);
       return;
     }
+    state.ws = ws;
 
     let settled = false;
     const settle = (ok: boolean) => {
       if (settled) return;
       settled = true;
+      state.ws = null;
       resolve(ok);
     };
 
@@ -1129,6 +1146,7 @@ async function sendTurnWebSocket(
       } catch {
         // ignore
       }
+      state.ws = null;
       finish();
       settle(true);
     };
