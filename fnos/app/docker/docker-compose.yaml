@@ -3,6 +3,7 @@ services:
     image: ghcr.io/veenyi/octop:latest
     container_name: octop
     restart: unless-stopped
+    pull_policy: always
     ports:
       - "8088:8088"
     volumes:
