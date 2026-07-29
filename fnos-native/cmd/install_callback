@@ -32,6 +32,26 @@ free_octop_ports() {
             fi
         done
     done
+
+    # 兜底：按命令行特征清理残留的 octop 服务进程（部分环境下 ss/fuser 拿不到 pid，
+    # 例如进程在其它用户/网络命名空间，或这些工具未安装）。直接按特征杀，确保 8089
+    # 在启动前一定空闲，避免“安装成功但服务起不来”。
+    for pat in 'octop.cli.main run' 'octop/bin/octop' 'octop-native/bin/octop'; do
+        pids="$(pgrep -f "$pat" 2>/dev/null | tr '\n' ' ')" || true
+        [ -z "$pids" ] && continue
+        echo "[octop] 发现残留 octop 服务进程 ($pat): $pids，准备清理" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+        # 先按进程组整体 TERM，再对存活者 KILL
+        for pid in $pids; do
+            kill -TERM "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+        done
+        sleep 1
+        for pid in $pids; do
+            if kill -0 "$pid" 2>/dev/null; then
+                kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+                echo "[octop] 已强制 KILL 残留 octop 服务进程 $pid" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+            fi
+        done
+    done
 }
 
 free_octop_ports
@@ -148,6 +168,19 @@ if id "$OCTOP_USER" >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
     else
         echo "[octop-native] 警告：${OCTOP_USER} 免密 sudo 真实执行未通过（可能 /etc/sudoers.d 未包含或 requiretty 未关闭）；若后续远程桌面报 sudo 错误，请在飞牛终端以 root 执行 visudo -c 并检查 /etc/sudoers 是否 #includedir /etc/sudoers.d。" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
     fi
+fi
+
+# ---------------------------------------------------------------------------
+# 将官方 octop CLI 暴露到 PATH，让用户安装后像官方一样直接用 `octop` 命令
+# （例如 `octop --help` / `octop provider list` / `octop agent list`）。
+# 真正的服务由飞牛应用中心托管（cmd/main 拉起 bin/octop），本 CLI 仅作命令行入口。
+# ---------------------------------------------------------------------------
+CLI_SRC="$APPDEST/bin/octop-cli"
+if [ -f "$CLI_SRC" ]; then
+    chmod +x "$CLI_SRC" 2>/dev/null || true
+    ln -sf "$CLI_SRC" /usr/local/bin/octop-cli
+    ln -sf "$CLI_SRC" /usr/local/bin/octop
+    echo "[octop-native] 已注册命令：octop / octop-cli -> $CLI_SRC" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
 fi
 
 exit 0
