@@ -6,8 +6,6 @@ import asyncio
 import json
 import logging
 import time
-import urllib.error
-import urllib.request
 from types import SimpleNamespace
 from typing import Any
 
