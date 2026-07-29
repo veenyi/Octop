@@ -107,6 +107,7 @@ fix_ownership_and_perms() {
 free_octop_ports
 
 PKGVAR="${TRIM_PKGVAR:-/var/apps/octop-native/var}"
+APPDEST="${TRIM_APPDEST:-/var/apps/octop-native}"
 mkdir -p "$PKGVAR"
 ENV_FILE="$PKGVAR/.env"
 

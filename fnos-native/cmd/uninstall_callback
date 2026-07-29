@@ -22,8 +22,9 @@ if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
 fi
 
 if [ "${wizard_delete_data:-no}" = "yes" ]; then
-    DATA_DIR="/vol1/@appshare/octop-native/data"
-    if [ -d "$DATA_DIR" ]; then
+    DATA_DIR="${TRIM_DATA_SHARE_PATHS:-}"
+    DATA_DIR="${DATA_DIR%%:*}"
+    if [ -n "$DATA_DIR" ] && [ -d "$DATA_DIR" ]; then
         rm -rf "$DATA_DIR" 2>/dev/null || true
         echo "[octop-native] 已删除用户数据: $DATA_DIR" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
     fi
