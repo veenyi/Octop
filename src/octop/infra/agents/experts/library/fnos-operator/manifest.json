@@ -1,0 +1,86 @@
+{
+  "id": "fnos-operator",
+  "label": {
+    "zh": "飞牛操作员",
+    "en": "FnOS Operator"
+  },
+  "description": {
+    "zh": "飞牛操作员 — 通过 trim-cli 直接操控本机飞牛 fnOS：登录、文件管理、共享目录、应用中心安装/启停/卸载、Docker 镜像与容器、存储池与磁盘 SMART、用户与用户组、日志与系统监控。适合让 octop 一站式管理飞牛系统。",
+    "en": "FnOS Operator — drives the local FnOS / TRIM NAS through trim-cli: login, file management, shared folders, app center install/start/stop/uninstall, Docker images and containers, storage pools and disk SMART, users and groups, logs and system monitoring."
+  },
+  "welcome_message": {
+    "zh": "我是飞牛操作员，告诉我你想对这台飞牛做什么",
+    "en": "I'm the FnOS operator — tell me what you want to do with this FnOS"
+  },
+  "icon_name": "server",
+  "color": "#0B5FFF",
+  "prompt_files": [
+    "SOUL.md"
+  ],
+  "quick_prompts": [
+    {
+      "title": {
+        "zh": "查看系统状态",
+        "en": "System status"
+      },
+      "description": {
+        "zh": "汇总系统信息、CPU、内存与存储总览",
+        "en": "Aggregate system info, CPU, memory and storage overview"
+      },
+      "prompt": {
+        "zh": "请登录本机飞牛并汇总系统状态（+status），包括机器类型、CPU、内存和存储总览。",
+        "en": "Please log in to the local FnOS and summarize system status (+status): machine type, CPU, memory and storage overview."
+      },
+      "color": "#e8f4ff",
+      "icon_name": "activity"
+    },
+    {
+      "title": {
+        "zh": "应用中心管理",
+        "en": "Manage apps"
+      },
+      "description": {
+        "zh": "列出、安装、启动或卸载应用",
+        "en": "List, install, start or uninstall apps"
+      },
+      "prompt": {
+        "zh": "请列出本机飞牛已安装的应用，并告诉我哪个可以停用或卸载。",
+        "en": "Please list the installed apps on this FnOS and tell me which can be stopped or uninstalled."
+      },
+      "color": "#fef3c7",
+      "icon_name": "layout-grid"
+    },
+    {
+      "title": {
+        "zh": "存储与磁盘健康",
+        "en": "Storage & disks"
+      },
+      "description": {
+        "zh": "查看存储池、磁盘与 SMART",
+        "en": "Inspect storage pools, disks and SMART"
+      },
+      "prompt": {
+        "zh": "请检查本机飞牛的存储池、磁盘列表和磁盘 SMART 健康状态，指出风险。",
+        "en": "Please inspect storage pools, disk list and disk SMART health on this FnOS and flag risks."
+      },
+      "color": "#dcfce7",
+      "icon_name": "hard-drive"
+    },
+    {
+      "title": {
+        "zh": "文件与共享",
+        "en": "Files & shares"
+      },
+      "description": {
+        "zh": "浏览目录、搜索文件、管理共享",
+        "en": "Browse dirs, search files, manage shares"
+      },
+      "prompt": {
+        "zh": "请帮我浏览飞牛的文件目录，并列出当前用户可见的共享目录。",
+        "en": "Please browse the FnOS file directories and list the shared folders visible to the current user."
+      },
+      "color": "#f1f5f9",
+      "icon_name": "folder"
+    }
+  ]
+}

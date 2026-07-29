@@ -1,0 +1,43 @@
+#!/bin/sh
+
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+BIN_DIR="$SCRIPT_DIR/../bin"
+
+OS=$(uname -s)
+ARCH=$(uname -m)
+
+case "$OS:$ARCH" in
+  Darwin:arm64)
+    TARGET="$BIN_DIR/trim-cli-darwin-arm64"
+    ;;
+  Darwin:x86_64)
+    TARGET="$BIN_DIR/trim-cli-darwin-x64"
+    ;;
+  Linux:x86_64)
+    TARGET="$BIN_DIR/trim-cli-linux-x64"
+    ;;
+  Linux:aarch64|Linux:arm64)
+    TARGET="$BIN_DIR/trim-cli-linux-arm64"
+    ;;
+  *)
+    echo "Unsupported platform for ./scripts/trim-cli: $OS $ARCH" >&2
+    exit 1
+    ;;
+esac
+
+# octop 把 skill 文件 seed 进 agent workspace 时可能丢失可执行位，
+# 这里自动补回 +x（agent 进程拥有该目录，可写）。
+if [ ! -x "$TARGET" ]; then
+  if command -v chmod >/dev/null 2>&1; then
+    chmod +x "$TARGET" 2>/dev/null || true
+  fi
+fi
+
+if [ ! -x "$TARGET" ]; then
+  echo "Missing or non-executable packaged binary: $TARGET" >&2
+  exit 1
+fi
+
+exec "$TARGET" "$@"
