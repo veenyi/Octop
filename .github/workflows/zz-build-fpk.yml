@@ -46,22 +46,20 @@ jobs:
 
       - name: Compute iteration
         id: iter
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VER=${{ steps.ver.outputs.version }}
-          # 查询已存在的 fnos-<ver>-NN tags，取最大序号 +1 作为本次迭代号
-          EXISTING=$(curl -sS -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/git/matching-refs/tags/fnos-${VER}-" \
+          # 查询已存在的 fnos-<ver>-NN tags，取最大序号 +1 作为本次迭代号。
+          # 使用 git ls-remote 直接读远程 tags，不依赖 GitHub API / token，避免
+          # API 限流、token 权限或网络抖动导致查询失败而回退成 0（结果每次
+          # 都覆盖 fnos-<ver>-01）。
+          EXISTING=$(git ls-remote --tags origin "fnos-${VER}-*" 2>/dev/null \
+            | awk -F'/' '{print $NF}' \
             | python3 -c "
-              import sys, json, re
-              data = json.load(sys.stdin)
-              refs = [r['ref'].replace('refs/tags/', '') for r in data if 'ref' in r]
+              import sys, re
               nums = []
-              pat = re.compile(r'fnos-[0-9]+\.[0-9]+\.[0-9]+-([0-9]+)$')
-              for ref in refs:
-                  m = pat.match(ref)
+              pat = re.compile(r'fnos-[0-9]+\\.[0-9]+\\.[0-9]+-([0-9]+)$')
+              for line in sys.stdin:
+                  m = pat.match(line.strip())
                   if m:
                       nums.append(int(m.group(1)))
               print(max(nums) if nums else 0)
@@ -72,7 +70,7 @@ jobs:
           echo "iter=$ITER" >> "$GITHUB_OUTPUT"
           echo "tag=fnos-${VER}-${ITER}" >> "$GITHUB_OUTPUT"
           echo "pkg_ver=${VER}-${ITER}" >> "$GITHUB_OUTPUT"
-          echo "[version] VER=$VER, ITER=$ITER, TAG=fnos-${VER}-${ITER}"
+          echo "[version] VER=$VER, EXISTING_MAX=$MAX, ITER=$ITER, TAG=fnos-${VER}-${ITER}"
 
   image:
     needs: version
