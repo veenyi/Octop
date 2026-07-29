@@ -56,25 +56,8 @@ jobs:
           # 限流或本地 tag 未拉取而回退成 0，导致每次都覆盖 fnos-<ver>-01。
           # GitHub CLI 在 Actions runner 中已预装且自动使用 GITHUB_TOKEN，最稳。
           echo "[version] existing releases matching fnos-${VER}-NN:"
-          gh release list --repo "${{ github.repository }}" --limit 100 --json tagName \
-            | python3 -c "
-              import sys, json
-              data = json.load(sys.stdin)
-              for r in data:
-                  print('  ' + r.get('tagName', ''))
-            "
-          EXISTING=$(gh release list --repo "${{ github.repository }}" --limit 100 --json tagName \
-            | python3 -c "
-              import sys, json, re
-              data = json.load(sys.stdin)
-              nums = []
-              pat = re.compile(r'fnos-[0-9]+\\.[0-9]+\\.[0-9]+-([0-9]+)$')
-              for r in data:
-                  m = pat.match(r.get('tagName', ''))
-                  if m:
-                      nums.append(int(m.group(1)))
-              print(max(nums) if nums else 0)
-            " 2>/dev/null || echo "0")
+          gh release list --repo "${{ github.repository }}" --limit 100 --json tagName | python3 -c 'import sys,json; [print("  "+r.get("tagName","")) for r in json.load(sys.stdin)]' || true
+          EXISTING=$(gh release list --repo "${{ github.repository }}" --limit 100 --json tagName | python3 -c 'import sys,json,re; d=json.load(sys.stdin); pat=re.compile(r"fnos-[0-9]+\.[0-9]+\.[0-9]+-([0-9]+)$"); nums=[int(pat.match(r.get("tagName","")).group(1)) for r in d if pat.match(r.get("tagName",""))]; print(max(nums) if nums else 0)')
           MAX=${EXISTING:-0}
           NEXT=$((MAX + 1))
           ITER=$(printf "%02d" "$NEXT")
