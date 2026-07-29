@@ -130,4 +130,15 @@ if command -v visudo >/dev/null 2>&1; then
 fi
 echo "[octop-native] 已配置 ${OCTOP_USER} 免密码 sudo" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
 
+# 整体校验：octop-native 现在能否真正免密 sudo（会解析全部 sudoers，
+# 若系统主 /etc/sudoers 本身有语法错误，这里会暴露出来，便于排查，
+# 否则用户要等到点“安装虚拟桌面”弹 sudo 密码时才能发现）。
+if command -v sudo >/dev/null 2>&1; then
+    if sudo -n -l -U "$OCTOP_USER" >/dev/null 2>&1; then
+        echo "[octop-native] 校验通过：${OCTOP_USER} 可免密 sudo" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+    else
+        echo "[octop-native] 警告：系统 sudoers 配置可能存在问题，${OCTOP_USER} 免密 sudo 校验未通过；若后续远程桌面报 sudo 错误，请在飞牛终端以 root 执行 visudo -c 检查 /etc/sudoers。" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+    fi
+fi
+
 exit 0
