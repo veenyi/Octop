@@ -37,6 +37,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Read version
         id: ver
@@ -49,11 +50,12 @@ jobs:
         run: |
           VER=${{ steps.ver.outputs.version }}
           # 查询已存在的 fnos-<ver>-NN tags，取最大序号 +1 作为本次迭代号。
-          # 使用 git ls-remote 直接读远程 tags，不依赖 GitHub API / token，避免
-          # API 限流、token 权限或网络抖动导致查询失败而回退成 0（结果每次
-          # 都覆盖 fnos-<ver>-01）。
-          EXISTING=$(git ls-remote --tags origin "fnos-${VER}-*" 2>/dev/null \
-            | awk -F'/' '{print $NF}' \
+          # actions/checkout@v4 with fetch-depth:0 已拉取全部本地 tags，直接
+          # 用 git tag -l 查询，完全不依赖网络 / GitHub API / origin 认证，
+          # 避免 CI 中远程查询返回空导致每次都回退成 01、覆盖旧 release。
+          echo "[version] local tags matching fnos-${VER}-*:"
+          git tag -l "fnos-${VER}-*" | sed 's/^/  /'
+          EXISTING=$(git tag -l "fnos-${VER}-*" \
             | python3 -c "
               import sys, re
               nums = []
@@ -79,6 +81,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -109,6 +112,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Build Docker FPK
         env:
@@ -135,6 +139,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Python 3.12 (build-only)
         uses: actions/setup-python@v5
@@ -250,6 +255,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       # 分别按名称下载，单个大产物（native-fpk ~560MB）单独下载比「下载全部」更稳定，
       # 避免 GitHub artifact 服务对“全部”模式偶发 5 次重试失败。
