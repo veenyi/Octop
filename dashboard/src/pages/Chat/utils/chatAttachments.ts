@@ -34,12 +34,9 @@ export const ACCEPTED_EXTENSIONS = new Set([
   ".zip",
 ]);
 
-export const CHAT_ACCEPT_ATTR = [
-  ...ACCEPTED_EXTENSIONS,
-  ...ACCEPTED_MIME_TYPES,
-].join(",");
+export const CHAT_ACCEPT_ATTR = ""; // 放开类型限制：文件选择器不再过滤，接受任意类型
 
-export const CHAT_MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+export const CHAT_MAX_ATTACHMENT_BYTES = 500 * 1024 * 1024; // 单文件上限 500MB
 
 const THINKING_TAG_RE = /<think>[\s\S]*?<\/redacted_thinking>\s*/gi;
 
@@ -81,12 +78,9 @@ export function inferAttachmentKind(
     : "file";
 }
 
-export function isAcceptedChatFile(file: File): boolean {
-  const type = (file.type || "").toLowerCase();
-  if (type && ACCEPTED_MIME_TYPES.has(type)) return true;
-
-  const lowerName = file.name.toLowerCase();
-  return [...ACCEPTED_EXTENSIONS].some((ext) => lowerName.endsWith(ext));
+export function isAcceptedChatFile(_file: File): boolean {
+  // 上传类型限制已放开：接受任意文件类型，不再拦截。
+  return true;
 }
 
 /** Vision block — backend materializes to ``image_url`` base64 for the LLM. */

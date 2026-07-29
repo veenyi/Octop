@@ -15,8 +15,11 @@ from octop.infra.gateway.media.constants import INBOUND_DIR
 if TYPE_CHECKING:
     from harness_agent.backends.workspace import BackendWorkspace
 
-MAX_INBOUND_BYTES = 20 * 1024 * 1024
+# 单文件上传上限：500MB（飞牛本地版放开限制，支持大文件/任意类型）。
+MAX_INBOUND_BYTES = 500 * 1024 * 1024
 
+# 历史上传类型白名单（保留作参考，自放开限制后不再参与强校验）。
+# 现在 validate_inbound_media_type 接受任意 MIME 类型，不再拦截 video/audio/压缩包等。
 ALLOWED_INBOUND_MEDIA_TYPES = frozenset(
     {
         "image/png",
@@ -89,10 +92,8 @@ def validate_inbound_size(data: bytes) -> None:
 
 
 def validate_inbound_media_type(media_type: str) -> str:
-    normalized_type = normalize_inbound_media_type(media_type)
-    if normalized_type not in ALLOWED_INBOUND_MEDIA_TYPES:
-        raise OctopError(ErrorCode.SLASH_BAD_ARGS, f"unsupported media type {normalized_type!r}")
-    return normalized_type
+    # 上传类型限制已放开：接受任意 MIME 类型，仅做规范化返回（不再拦截）。
+    return normalize_inbound_media_type(media_type)
 
 
 def sanitize_inbound_filename(filename: str) -> str:

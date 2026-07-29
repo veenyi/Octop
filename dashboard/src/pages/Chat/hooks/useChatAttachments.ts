@@ -32,7 +32,7 @@ export function useChatAttachments(agentId: string | null | undefined) {
         }
         if (f.size > CHAT_MAX_ATTACHMENT_BYTES) {
           antMessage.error(
-            t("upload.tooLarge", "File too large (max 20MB): {{name}}", {
+            t("upload.tooLarge", "File too large (max 500MB): {{name}}", {
               name: f.name,
             }),
           );

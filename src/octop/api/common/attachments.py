@@ -12,7 +12,8 @@ from octop.infra.gateway.media.inbound_store import InboundFile, write_inbound
 if TYPE_CHECKING:
     from harness_agent.backends.workspace import BackendWorkspace
 
-MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+# 单文件上传上限：500MB（与 inbound_store.MAX_INBOUND_BYTES 保持一致；飞牛本地版放开限制）。
+MAX_ATTACHMENT_BYTES = 500 * 1024 * 1024
 
 
 @dataclass(frozen=True)
