@@ -83,9 +83,12 @@ COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # 安装项目 + 全部附加组件（browser 已在核心依赖，desktop 显式加入）
+# UV_INDEX_URL 首选阿里云镜像加速；UV_DEFAULT_INDEX 保留 PyPI 作为兜底，
+# 避免新发布的包（如 orcakit-harness-agent 0.9.16）尚未同步到镜像时构建失败。
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv venv /app/.venv \
-    && UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple \
+    && UV_DEFAULT_INDEX=https://pypi.org/simple \
+       UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple \
        UV_INSECURE_HOST=mirrors.aliyun.com \
        uv pip install --python /app/.venv ".[desktop]" \
     && PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright \
