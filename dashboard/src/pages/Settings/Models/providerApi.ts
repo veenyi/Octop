@@ -31,28 +31,30 @@ export async function testProviderDraft(
   });
 }
 
-export interface FetchedModel {
+export interface FetchProviderModelsParams {
+  kind: string;
+  api_key?: string;
+  base_url?: string | null;
+  extra_json?: string | null;
+}
+
+export interface FetchedProviderModel {
   id: string;
   name: string;
 }
 
 export interface FetchProviderModelsResult {
   ok: boolean;
-  models?: FetchedModel[];
+  models?: FetchedProviderModel[];
   error?: string;
 }
 
-export async function fetchProviderModels(params: {
-  name: string;
-  kind: string;
-  api_key?: string;
-  base_url?: string | null;
-  extra_json?: string | null;
-}): Promise<FetchProviderModelsResult> {
+export async function fetchProviderModels(
+  params: FetchProviderModelsParams,
+): Promise<FetchProviderModelsResult> {
   return request<FetchProviderModelsResult>("/admin/providers/fetch-models", {
     method: "POST",
     body: JSON.stringify({
-      name: params.name,
       kind: params.kind,
       api_key: params.api_key?.trim() || null,
       base_url: params.base_url?.trim() || null,

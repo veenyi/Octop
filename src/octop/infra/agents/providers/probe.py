@@ -11,9 +11,14 @@ import urllib.request
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
+
 from octop.infra.agents.providers import KIND_TO_PROTOCOL
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
+_FETCH_MODELS_TIMEOUT_S = 30.0
 
 
 def provider_headers(row: Any) -> dict[str, str]:
@@ -106,74 +111,65 @@ async def probe_provider_row(row: Any, *, model_id: str | None = None) -> dict[s
     return {"ok": True, "latency_ms": latency_ms}
 
 
-def fetch_openai_compatible_models(
+def _models_list_url(base_url: str | None) -> str:
+    root = (base_url or "").strip().rstrip("/") or _DEFAULT_OPENAI_BASE_URL
+    return f"{root}/models"
+
+
+async def fetch_openai_compatible_models(
     *,
-    api_key: str | None,
     base_url: str | None,
-    extra_json: str | None = None,
-    timeout_s: float = 30.0,
+    api_key: str,
+    extra_headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Fetch the model list from an OpenAI-compatible ``/v1/models`` endpoint.
-
-    Uses only the standard library so it works without optional HTTP clients.
-    Returns ``{"ok": True, "models": [{"id": ..., "name": ...}]}`` or
-    ``{"ok": False, "error": ...}``.
-    """
-    base = (base_url or "").strip() or "https://api.openai.com/v1"
-    # Ensure we end up with ``<base>/models`` regardless of trailing slashes.
-    url = base.rstrip("/") + "/models"
-
-    headers: dict[str, str] = {"Accept": "application/json"}
-    key = (api_key or "").strip()
-    if key:
-        headers["Authorization"] = f"Bearer {key}"
-
-    # Merge any custom headers from extra_json (e.g. third-party gateways).
-    if extra_json:
-        try:
-            extra = json.loads(extra_json)
-            if isinstance(extra, dict):
-                custom = extra.get("headers")
-                if isinstance(custom, dict):
-                    for k, v in custom.items():
-                        if isinstance(k, str) and isinstance(v, str):
-                            headers[k] = v
-        except json.JSONDecodeError:
-            pass
-
-    req = urllib.request.Request(url, headers=headers, method="GET")
+    """List models via OpenAI-compatible ``GET {base}/models``."""
+    url = _models_list_url(base_url)
+    headers: dict[str, str] = {"Authorization": f"Bearer {api_key}"}
+    if extra_headers:
+        headers.update(extra_headers)
     try:
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        logger.info("fetch models failed: %s %s", exc.code, body)
-        return {"ok": False, "error": f"HTTP {exc.code}: {body or exc.reason}"}
+        async with httpx.AsyncClient(timeout=_FETCH_MODELS_TIMEOUT_S) as client:
+            response = await client.get(url, headers=headers)
     except Exception as exc:
-        logger.info("fetch models failed: %s", exc)
+        logger.info("provider fetch-models failed for %s: %s", url, exc)
         return {"ok": False, "error": str(exc)}
 
-    entries = payload.get("data") if isinstance(payload, dict) else None
-    if not isinstance(entries, list):
-        return {"ok": False, "error": "unexpected response format from /v1/models"}
+    if response.status_code >= 400:
+        detail = response.text.strip()
+        if len(detail) > 300:
+            detail = detail[:300] + "…"
+        error = f"HTTP {response.status_code}"
+        if detail:
+            error = f"{error}: {detail}"
+        return {"ok": False, "error": error}
+
+    try:
+        payload = response.json()
+    except Exception:
+        return {
+            "ok": False,
+            "error": "response is not valid JSON (expected OpenAI-compatible /models)",
+        }
+
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, list):
+        return {
+            "ok": False,
+            "error": "response is not OpenAI-compatible (expected {data: [{id, …}]})",
+        }
 
     models: list[dict[str, str]] = []
     seen: set[str] = set()
-    for entry in entries:
-        if not isinstance(entry, dict):
+    for item in data:
+        if not isinstance(item, dict):
             continue
-        model_id = entry.get("id")
-        if not isinstance(model_id, str) or not model_id.strip():
+        mid = item.get("id")
+        if not isinstance(mid, str) or not mid.strip():
             continue
-        model_id = model_id.strip()
-        if model_id in seen:
+        mid = mid.strip()
+        if mid in seen:
             continue
-        seen.add(model_id)
-        # Some providers expose a display name; fall back to id.
-        name = entry.get("name")
-        if not isinstance(name, str) or not name.strip():
-            name = model_id
-        models.append({"id": model_id, "name": name.strip()})
-
-    models.sort(key=lambda m: m["id"].lower())
+        seen.add(mid)
+        models.append({"id": mid, "name": mid})
+    models.sort(key=lambda m: m["id"])
     return {"ok": True, "models": models}

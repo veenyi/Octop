@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from types import SimpleNamespace
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends
@@ -16,6 +17,7 @@ from octop.infra.agents.providers.probe import (
     fetch_openai_compatible_models,
     make_probe_provider_row,
     probe_provider_row,
+    provider_headers,
 )
 from octop.infra.agents.providers.resolved import list_resolved_models as _list_resolved_models
 from octop.infra.errors import ErrorCode, OctopError
@@ -83,25 +85,10 @@ class ProviderTestDraftBody(BaseModel):
 
 
 class ProviderFetchModelsBody(BaseModel):
-    name: str
     kind: str
     api_key: str | None = None
     base_url: str | None = None
     extra_json: str | None = None
-
-
-def _provider_headers(row: Any) -> dict[str, str]:
-    raw = getattr(row, "extra_json", None)
-    if not raw:
-        return {}
-    try:
-        extra = json.loads(raw)
-    except Exception:
-        return {}
-    if not isinstance(extra, dict):
-        return {}
-    headers = extra.get("headers")
-    return dict(headers) if isinstance(headers, dict) else {}
 
 
 def _is_codex_base_url(base_url: str | None) -> bool:
@@ -301,24 +288,26 @@ async def admin_test_provider_draft(
     return await probe_provider_row(row, model_id=model_id)
 
 
-@admin_router.post("/fetch-models", summary="Fetch models from an OpenAI-compatible endpoint")
+@admin_router.post("/fetch-models", summary="List models from an OpenAI-compatible draft")
 async def admin_fetch_provider_models(
     body: ProviderFetchModelsBody,
     _: Any = Depends(current_admin),
 ) -> dict[str, Any]:
-    """Return the list of models exposed by an OpenAI-compatible provider."""
+    """Fetch remote model ids via OpenAI-compatible ``GET /models`` (openai kind only)."""
     if body.kind != "openai":
         return {
             "ok": False,
-            "error": "only OpenAI-compatible providers support automatic model discovery",
+            "error": "fetch models is only supported for openai-compatible providers",
         }
-    result = await asyncio.to_thread(
-        fetch_openai_compatible_models,
-        api_key=body.api_key,
+    api_key = (body.api_key or "").strip()
+    if not api_key:
+        return {"ok": False, "error": "api_key is required"}
+    draft = SimpleNamespace(extra_json=body.extra_json)
+    return await fetch_openai_compatible_models(
         base_url=(body.base_url or "").strip() or None,
-        extra_json=body.extra_json,
+        api_key=api_key,
+        extra_headers=provider_headers(draft) or None,
     )
-    return result
 
 
 async def _run_codex_device_poll(
