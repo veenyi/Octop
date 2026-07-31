@@ -1,8 +1,18 @@
 name: Sync Main Into Develop
 
-# After a GitHub Release is published (Release workflow: PyPI → github-release),
-# open a main → develop sync PR and merge it when possible.
+# After Release succeeds, sync main → develop.
+#
+# Do NOT rely only on `release: published`: when the Release workflow creates a
+# GitHub Release with GITHUB_TOKEN, GitHub does not start other `release`
+# workflows. `workflow_run` does fire for GITHUB_TOKEN-triggered workflows.
+# `workflow_dispatch` allows a manual catch-up from the Actions tab.
 on:
+  workflow_run:
+    workflows:
+      - Release
+    types:
+      - completed
+  workflow_dispatch:
   release:
     types:
       - published
@@ -14,7 +24,12 @@ permissions:
 jobs:
   sync:
     name: Sync main into develop
-    if: startsWith(github.event.release.tag_name, 'v')
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')) ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -25,7 +40,7 @@ jobs:
       - name: Open or merge sync PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || github.event.workflow_run.head_branch || 'manual' }}
         run: |
           set -euo pipefail
           version="${TAG#v}"
