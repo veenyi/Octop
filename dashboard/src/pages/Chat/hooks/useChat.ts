@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useSyncExternalStore, useEffect } from "react";
+import { useState, useCallback, useRef, useSyncExternalStore } from "react";
 import type {
   MessageMetadata,
   TokenUsage,
@@ -580,15 +580,9 @@ export function useChat(
 
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyRefreshing, setHistoryRefreshing] = useState(false);
-  const [backgroundRunning, setBackgroundRunning] = useState(false);
   const loadGenRef = useRef(0);
   const loadMoreInFlightRef = useRef(false);
   const refreshInFlightRef = useRef(false);
-  const backgroundPollRef = useRef<number | null>(null);
-  // Initialized to null and kept in sync via `refreshHistoryRef.current =
-  // refreshHistory` below, because `refreshHistory` is declared later in this
-  // hook body (referencing it here directly would hit the temporal dead zone).
-  const refreshHistoryRef = useRef<(() => Promise<void>) | null>(null);
 
   const sendMessage = useCallback(
     (
@@ -765,56 +759,6 @@ export function useChat(
     }
   }, [agentId, stableSessionId, historyRefreshing, historyLoading]);
 
-  // Keep a stable ref to the latest refreshHistory so the background poller
-  // does not restart every time the callback identity changes.
-  refreshHistoryRef.current = refreshHistory;
-
-  // Detect an "incomplete" conversation: the user's last message has no
-  // follow-up assistant stream. This happens after the live WebSocket dropped
-  // (phone slept / tab closed) while the backend kept working.
-  const lastMessage = messages[messages.length - 1];
-  const hasStreaming = messages.some((m) => m.status === "streaming");
-  const looksIncomplete =
-    !isStreaming && !hasStreaming && lastMessage?.role === "user";
-
-  /**
-   * Background recovery polling.
-   *
-   * If the user sent a turn and then the WebSocket dropped (phone slept,
-   * browser closed, network change), the backend keeps running.  We detect
-   * that the last visible message is a user message with no active stream
-   * and poll thread history until the assistant reply appears.
-   */
-  useEffect(() => {
-    if (!agentId || stableSessionId === "__empty__") return undefined;
-    if (!historyHydrated) return undefined;
-
-    if (!looksIncomplete) {
-      if (backgroundPollRef.current) {
-        window.clearInterval(backgroundPollRef.current);
-        backgroundPollRef.current = null;
-        setBackgroundRunning(false);
-      }
-      return undefined;
-    }
-
-    if (backgroundPollRef.current) return undefined;
-
-    setBackgroundRunning(true);
-    backgroundPollRef.current = window.setInterval(() => {
-      void refreshHistoryRef.current?.();
-    }, 2000);
-
-    return () => {
-      if (backgroundPollRef.current) {
-        window.clearInterval(backgroundPollRef.current);
-        backgroundPollRef.current = null;
-      }
-    };
-    // `looksIncomplete` is a primitive derived from `messages`; depending on it
-    // (rather than the whole array) keeps the interval stable across renders.
-  }, [agentId, stableSessionId, looksIncomplete, historyHydrated]);
-
   /**
    * Edit a historical user message: truncate everything from that message
    * onwards, replace its content, then re-send to the backend.
@@ -879,7 +823,6 @@ export function useChat(
     historyLoadingMore,
     historyRefreshing,
     historyHydrated,
-    backgroundRunning,
     sendMessage,
     editAndResend,
     cancelStream,

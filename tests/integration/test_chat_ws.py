@@ -114,64 +114,7 @@ async def test_ws_emits_chunks_then_done(env: Any) -> None:
     assert chunks[-1]["type"] == "done"
 
 
-def _cancel_ws_turn_sync(
-    app: object,
-    aid: str,
-    token: str,
-) -> list[dict[str, Any]]:
-    chunks: list[dict[str, Any]] = []
-    with TestClient(app).websocket_connect(  # type: ignore[attr-defined]
-        f"/api/agents/{aid}/chat/ws?token={token}"
-    ) as ws:
-        ws.send_json({"type": "user_turn", "text": "cancel me"})
-        while True:
-            raw = ws.receive_text()
-            chunk = json.loads(raw)
-            chunks.append(chunk)
-            if chunk.get("type") == "token":
-                ws.send_json({"type": "cancel"})
-            if chunk.get("type") in ("done", "error"):
-                break
-    return chunks
-
-
-async def test_ws_cancel_frame_cancels_active_turn(env: Any) -> None:
-    c, srv, _fake, alice_auth, _bob_auth, aid = env
-    agent = srv.app_runtime.agent_registry.get_agent(aid)
-
-    async def slow_stream(request: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
-        yield {"type": "token", "node": "agent", "content": "started"}
-        await asyncio.sleep(1)
-
-    agent.stream = slow_stream
-    original_cancel = srv.app_runtime.agent_registry.cancel_stream
-    cancel_spy = MagicMock(wraps=original_cancel)
-    srv.app_runtime.agent_registry.cancel_stream = cancel_spy
-
-    chunks = await asyncio.to_thread(
-        _cancel_ws_turn_sync,
-        c._octop_app,  # type: ignore[attr-defined]
-        aid,
-        ws_token(alice_auth),
-    )
-
-    for _ in range(20):
-        if cancel_spy.called:
-            break
-        await asyncio.sleep(0.01)
-    cancel_spy.assert_called_once()
-    assert cancel_spy.call_args.args[0] == aid
-    assert chunks[-1]["type"] == "done"
-
-
-async def test_ws_disconnect_does_not_cancel_active_turn(env: Any) -> None:
-    """Closing the socket while a turn is running must keep it alive.
-
-    This matches the mobile/resilient-chat behaviour: if the phone goes to
-    sleep or the browser tab closes, the agent finishes in the background and
-    writes its final answer to the thread checkpoint.  Cancellation is only
-    triggered by the explicit ``cancel`` frame (tested above).
-    """
+async def test_ws_disconnect_cancels_active_turn(env: Any) -> None:
     c, srv, _fake, alice_auth, _bob_auth, aid = env
     agent = srv.app_runtime.agent_registry.get_agent(aid)
 
@@ -191,8 +134,12 @@ async def test_ws_disconnect_does_not_cancel_active_turn(env: Any) -> None:
         ws_token(alice_auth),
     )
 
-    await asyncio.sleep(0.05)
-    cancel_spy.assert_not_called()
+    for _ in range(20):
+        if cancel_spy.called:
+            break
+        await asyncio.sleep(0.01)
+    cancel_spy.assert_called_once()
+    assert cancel_spy.call_args.args[0] == aid
 
 
 async def test_ws_emits_error_frame_on_exception(env: Any) -> None:

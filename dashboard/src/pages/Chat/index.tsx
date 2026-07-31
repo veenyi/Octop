@@ -193,7 +193,6 @@ function ChatPageInner() {
     refreshHistory,
     clearMessages,
     resumeHitl,
-    backgroundRunning,
   } = useChat(activeThreadId, resolvedAgentId);
 
   const refreshBrowserRef = useRef<() => void>(() => {});
@@ -641,7 +640,6 @@ function ChatPageInner() {
                 thinkingStartedAt={thinkingStartedAt}
                 sessionKey={activeThreadId ?? undefined}
                 onCancel={cancelStream}
-                backgroundRunning={backgroundRunning}
                 onRegenerate={handleRegenerate}
                 onEditUserMessage={handleEditUserMessage}
                 onAcpPermissionSelect={handleAcpPermissionSelect}

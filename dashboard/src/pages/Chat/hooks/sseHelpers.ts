@@ -89,8 +89,6 @@ export interface SessionStreamState {
   streamBlockType: "thinking" | "text" | "";
   /** Map from harness tool-call id (or ``idx-<n>`` fallback) → assistant bubble id. */
   toolCallIdIndex: Record<string, string>;
-  /** Active WebSocket for the current turn, used to send explicit cancel frames. */
-  ws: WebSocket | null;
   historyHasMore: boolean;
   historyNextOffset: number;
   historyLoadingMore: boolean;
