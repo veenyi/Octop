@@ -1,0 +1,4 @@
+# 上游与本地常在 .gitignore 末尾各自追加独立规则，常规 3-way merge 会判冲突使
+# sync 工作流中止。用 union 合并驱动让「末尾追加」类冲突自动保留双方内容，
+# 无需人工合入。其它类型冲突仍按默认 3-way 处理。
+.gitignore merge=union
