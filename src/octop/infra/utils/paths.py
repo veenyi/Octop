@@ -59,6 +59,11 @@ class PathLayout:
         """Cached SkillHub expert templates: ``~/.octop/expert_market/``."""
         return self.root / "expert_market"
 
+    @property
+    def skill_packages_dir(self) -> Path:
+        """Global skill package content: ``~/.octop/skill-packages/``."""
+        return self.root / "skill-packages"
+
     def agent_workspace(self, agent_id: str) -> Path:
         """Global agent workspace: ~/.octop/agents/<agent_id>/"""
         return self.agents_dir / agent_id
@@ -107,5 +112,24 @@ class PathLayout:
 
     def ensure_ssl_dir(self) -> Path:
         out = self.ssl_dir
+        out.mkdir(parents=True, exist_ok=True)
+        return out
+
+    @property
+    def connector_cli_dir(self) -> Path:
+        """Per-instance CLI config roots: ``~/.octop/connector-cli/``."""
+        return self.root / "connector-cli"
+
+    def connector_cli_instance_dir(self, kind: str, instance_key: str) -> Path:
+        """Isolated config dir for one connector CLI instance."""
+        safe_kind = Path(kind).name
+        safe_key = (
+            "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in instance_key)[:80]
+            or "default"
+        )
+        return self.connector_cli_dir / safe_kind / safe_key
+
+    def ensure_connector_cli_instance_dir(self, kind: str, instance_key: str) -> Path:
+        out = self.connector_cli_instance_dir(kind, instance_key)
         out.mkdir(parents=True, exist_ok=True)
         return out

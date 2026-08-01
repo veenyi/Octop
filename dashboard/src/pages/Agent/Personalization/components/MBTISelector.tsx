@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { message, Spin, Modal } from "antd";
+import { Spin, Modal } from "antd";
+import { message } from "@/utils/antdMessage";
+
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { FlaskConical, Sparkles, Check } from "lucide-react";
@@ -252,12 +254,15 @@ function TypeDetail({
 
 export default function MBTISelector({
   showHeader = true,
+  showTestAction = false,
   testOpen: testOpenProp,
   onTestOpenChange,
   onApplied,
   agentId,
 }: {
   showHeader?: boolean;
+  /** When showHeader is false, still show the take-test button row. */
+  showTestAction?: boolean;
   testOpen?: boolean;
   onTestOpenChange?: (open: boolean) => void;
   /** When provided, called after a successful apply instead of navigating to chat. */
@@ -369,6 +374,12 @@ export default function MBTISelector({
     { key: "explorers", codes: ["ISTP", "ISFP", "ESTP", "ESFP"] },
   ];
   const typeMap = new Map(types.map((t) => [t.code, t]));
+  const currentType = currentCode ? typeMap.get(currentCode) : undefined;
+  const currentLabel = currentType
+    ? `${currentType.code} ${
+        lang === "zh" ? currentType.name_zh : currentType.name_en
+      }`
+    : "";
 
   return (
     <div className={styles.mbtiSelector}>
@@ -391,6 +402,26 @@ export default function MBTISelector({
           </button>
         </div>
       )}
+
+      <div className={styles.listToolbar}>
+        <span className={styles.listToolbarMeta}>
+          {t("personalization.mbti.listSummary", {
+            total: types.length,
+            selected: currentLabel,
+            defaultValue:
+              "当前有（{{total}}）个人格，已选中「{{selected}}」",
+          })}
+        </span>
+        {!showHeader && showTestAction && (
+          <button
+            className={styles.testButton}
+            onClick={() => setTestOpen(true)}
+          >
+            <FlaskConical size={14} />
+            {t("personalization.mbti.takeTest")}
+          </button>
+        )}
+      </div>
 
       {/* Cards only — no detail panel */}
       <div className={styles.cardsArea}>

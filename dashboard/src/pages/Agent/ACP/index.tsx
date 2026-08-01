@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Empty, Form, Modal, Switch, message } from "antd";
+import { Button, Empty, Form, Modal, Switch } from "antd";
+import { message } from "@/utils/antdMessage";
+
 import { useTranslation } from "react-i18next";
 import PageShell from "../../../layouts/PageShell";
 import { CardSkeleton } from "../../../components/Skeleton";
@@ -16,7 +18,7 @@ import {
   runnerToFormValues,
 } from "./components/ACPDrawer";
 import { BUILTIN_RUNNER_ORDER, isBuiltinRunner } from "./constants";
-import channelStyles from "../../Control/Channels/index.module.less";
+import channelStyles from "../Channels/index.module.less";
 import styles from "./index.module.less";
 
 const EMPTY_RUNNERS: Record<string, ACPRunnerConfig> = {};

@@ -11,8 +11,9 @@ import {
   Switch,
   Tabs,
   Typography,
-  message,
 } from "antd";
+import { message } from "@/utils/antdMessage";
+
 import { useTranslation } from "react-i18next";
 import PageShell from "../../../layouts/PageShell";
 import {
@@ -177,13 +178,15 @@ export default function SecuritySettingsPage() {
   const isPolicyTab = POLICY_TABS.has(activeTab);
 
   return (
-    <PageShell
+    <PageShell.FillTabs
       title={t("pageShell.security.title")}
       subtitle={t("pageShell.security.subtitle")}
     >
       <div className={styles.wrap}>
         {isPolicyTab && (
-          <Paragraph type="secondary">{t("security.intro")}</Paragraph>
+          <Paragraph type="secondary" style={{ flexShrink: 0 }}>
+            {t("security.intro")}
+          </Paragraph>
         )}
         <Form
           form={form}
@@ -194,7 +197,7 @@ export default function SecuritySettingsPage() {
           <Tabs
             activeKey={activeTab}
             onChange={selectTab}
-            destroyInactiveTabPane={false}
+            destroyOnHidden={false}
             items={[
               {
                 key: "hitl",
@@ -382,6 +385,6 @@ export default function SecuritySettingsPage() {
           )}
         </Form>
       </div>
-    </PageShell>
+    </PageShell.FillTabs>
   );
 }

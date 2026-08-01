@@ -19,7 +19,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Spin, Tabs, Segmented, Tooltip, message } from "antd";
+import { Spin, Tabs, Segmented, Tooltip } from "antd";
+import { message } from "@/utils/antdMessage";
+
 import { GraduationCap, LayoutGrid, List, RefreshCw } from "lucide-react";
 import PageShell from "../../layouts/PageShell";
 import { request } from "../../api/request";
@@ -389,7 +391,7 @@ export default function ExpertsPage() {
   );
 
   return (
-    <PageShell
+    <PageShell.FillTabs
       title={t("pageShell.experts.title")}
       subtitle={t("pageShell.experts.subtitle")}
     >
@@ -429,6 +431,6 @@ export default function ExpertsPage() {
         onClose={() => setCreateExpert(null)}
         onCreated={handleCreated}
       />
-    </PageShell>
+    </PageShell.FillTabs>
   );
 }

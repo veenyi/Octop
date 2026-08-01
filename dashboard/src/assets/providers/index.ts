@@ -16,6 +16,7 @@ import mimoLogo from "./mimo.svg";
 import minimaxLogo from "./minimax.png";
 import volcesLogo from "./volces.svg";
 import customProviderLogo from "./custom-provider.svg";
+import opencodeLogo from "./opencode.svg";
 
 export const PROVIDER_LOGOS: Record<string, string> = {
   openai: openaiLogo,
@@ -36,6 +37,7 @@ export const PROVIDER_LOGOS: Record<string, string> = {
   mimo: mimoLogo,
   minimax: minimaxLogo,
   volces: volcesLogo,
+  opencode: opencodeLogo,
 };
 
 export { customProviderLogo };
@@ -53,6 +55,7 @@ export function getProviderLogo(providerId: string): string | undefined {
     volcengine: volcesLogo,
     siliconflow: siliconLogo,
     tencent: tencentCodingPlanLogo,
+    opencode: opencodeLogo,
   };
   return groupLogo[base];
 }
@@ -79,10 +82,44 @@ export const PROVIDER_DOCS: Record<string, string> = {
   mimo: "https://platform.xiaomimimo.com/",
   minimax: "https://platform.minimaxi.com/",
   volces: "https://www.volcengine.com/docs/82379/1399008",
+  opencode: "https://opencode.ai/docs/zh-cn/zen/",
+  "opencode-zen-openai": "https://opencode.ai/docs/zh-cn/zen/",
+  "opencode-zen-anthropic": "https://opencode.ai/docs/zh-cn/zen/",
+  "opencode-zen-compatible": "https://opencode.ai/docs/zh-cn/zen/",
+  "opencode-go-openai": "https://opencode.ai/docs/zh-cn/go/",
+  "opencode-go-anthropic": "https://opencode.ai/docs/zh-cn/go/",
+  "opencode-go-compatible": "https://opencode.ai/docs/zh-cn/go/",
 };
 
+const OPENCODE_ZEN_DOCS = "https://opencode.ai/docs/zh-cn/zen/";
+const OPENCODE_GO_DOCS = "https://opencode.ai/docs/zh-cn/go/";
+
+function normalizeProviderDocsKey(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[()]/g, "")
+    .replace(/[\s·]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function opencodeDocsFallback(normalized: string): string | undefined {
+  if (!normalized.startsWith("opencode")) return undefined;
+  if (normalized.includes("-go-")) return OPENCODE_GO_DOCS;
+  return OPENCODE_ZEN_DOCS;
+}
+
 export function getProviderDocs(providerId: string): string | undefined {
-  return PROVIDER_DOCS[providerId];
+  const direct = PROVIDER_DOCS[providerId];
+  if (direct) return direct;
+
+  const normalized = normalizeProviderDocsKey(providerId);
+  if (normalized !== providerId) {
+    const fromNormalized = PROVIDER_DOCS[normalized];
+    if (fromNormalized) return fromNormalized;
+  }
+
+  return opencodeDocsFallback(normalized);
 }
 
 /**
