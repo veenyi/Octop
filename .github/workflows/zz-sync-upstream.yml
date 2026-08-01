@@ -25,12 +25,15 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Git identity
         run: |
@@ -40,7 +43,7 @@ jobs:
       - name: Sync from TencentCloud/Octop
         id: sync
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           git remote add upstream https://github.com/TencentCloud/Octop.git \
             || git remote set-url upstream https://github.com/TencentCloud/Octop.git
@@ -50,7 +53,7 @@ jobs:
           # 用 FETCH_HEAD 可靠引用上游 main，避免 remote-tracking ref 未创建导致 merge 失败。
           git fetch upstream main
 
-          if ! git merge -X theirs FETCH_HEAD --no-edit; then
+          if ! git merge FETCH_HEAD --no-edit; then
             echo "合并出现无法自动解决的冲突，已中止本次同步（下次重试）。"
             git merge --abort || true
             echo "synced=false" >> "$GITHUB_OUTPUT"
@@ -70,7 +73,7 @@ jobs:
       - name: Trigger build & release
         if: steps.sync.outputs.synced == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           echo "同步到新提交，触发双环境构建与发布 ..."
           gh workflow run zz-build-fpk.yml
