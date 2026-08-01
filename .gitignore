@@ -97,3 +97,5 @@ dist/
 *.fpk
 build.log
 build.err
+
+scripts/lh_image_install_octop_tencentos.sh
