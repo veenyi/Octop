@@ -28,7 +28,7 @@ def coerce_read_content(content: Any) -> str:
 
 
 def require_running_agent(server: Any, agent_id: str) -> HarnessAgent:
-    """Return the live harness agent or raise ``AGENT_NOT_FOUND``."""
+    """Return the live harness agent or raise not-running / not-found errors."""
     assert server.app_runtime is not None
     return cast("HarnessAgent", server.app_runtime.agent_registry.get_agent(agent_id))
 

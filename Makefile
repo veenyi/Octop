@@ -7,7 +7,7 @@
 #
 # Prerequisites:
 #   - Node.js + npm   (frontend)
-#   - Python 3.11+    (backend)
+#   - Python 3.12+    (backend)
 #   - uv              (recommended) or pip
 #   - twine           (publish: pip install twine / make install-tools)
 

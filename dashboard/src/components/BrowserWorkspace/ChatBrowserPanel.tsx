@@ -45,6 +45,7 @@ const ChatBrowserPanel: React.FC<ChatBrowserPanelProps> = ({
       <BrowserWorkspace
         sessionId={sessionId}
         environment={environment}
+        hideHeaderRefresh
         style={{ flex: 1, minHeight: 0 }}
         bookmarked={bookmarked}
         onToggleBookmark={onToggleBookmark}

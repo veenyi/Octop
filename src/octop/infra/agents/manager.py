@@ -531,14 +531,27 @@ class AgentManager:
     def get_agent(self, agent_id: str) -> HarnessAgent:
         """Return the live HarnessAgent for agent_id (ULID).
 
-        Raises OctopError.AGENT_NOT_FOUND if not running.
+        Raises:
+            AGENT_NOT_FOUND — no such agent row
+            AGENT_FAILED — agent exists but last start failed
+            AGENT_NOT_RUNNING — agent exists but is not loaded in harness
         """
         if self._harness_manager is None:
-            raise OctopError(ErrorCode.AGENT_NOT_FOUND, f"agent {agent_id!r} not running")
+            raise self._unavailable_error(agent_id)
         try:
             return self._harness_manager.get_agent(agent_id).agent
         except KeyError:
-            raise OctopError(ErrorCode.AGENT_NOT_FOUND, f"agent {agent_id!r} not running") from None
+            raise self._unavailable_error(agent_id) from None
+
+    def _unavailable_error(self, agent_id: str) -> OctopError:
+        """Map a missing live harness handle to the right public error code."""
+        row = self.get_row(agent_id)
+        if row is None:
+            return OctopError(ErrorCode.AGENT_NOT_FOUND, f"agent {agent_id!r} not found")
+        state = (row.last_state or "").strip().lower()
+        if state in ("failed", "error"):
+            return OctopError(ErrorCode.AGENT_FAILED, f"agent {agent_id!r} failed to start")
+        return OctopError(ErrorCode.AGENT_NOT_RUNNING, f"agent {agent_id!r} not running")
 
     async def delete_thread_checkpoint(self, agent_id: str, thread_id: str) -> bool:
         """Best-effort delete of a thread's actual conversation data.
@@ -578,7 +591,7 @@ class AgentManager:
     async def stream(self, agent_id: str, request: dict[str, Any]) -> AsyncIterator[Any]:
         """Stream harness chunks (Langfuse tracing handled inside harness-agent)."""
         if self._harness_manager is None:
-            raise OctopError(ErrorCode.AGENT_NOT_FOUND, f"agent {agent_id!r} not running")
+            raise self._unavailable_error(agent_id)
 
         self._apply_pending_bootstrap_graph_refresh(agent_id)
         req = self._prepare_stream_request(agent_id, request)
@@ -589,7 +602,7 @@ class AgentManager:
     async def call(self, agent_id: str, request: dict[str, Any]) -> dict[str, Any]:
         """Non-streaming harness invocation (one-shot agent call)."""
         if self._harness_manager is None:
-            raise OctopError(ErrorCode.AGENT_NOT_FOUND, f"agent {agent_id!r} not running")
+            raise self._unavailable_error(agent_id)
         self._apply_pending_bootstrap_graph_refresh(agent_id)
         req = self._prepare_stream_request(agent_id, request)
         result = await self._harness_manager.call(agent_id, cast(Any, req))
@@ -606,7 +619,7 @@ class AgentManager:
     ) -> AsyncIterator[Any]:
         """Resume a paused HITL interrupt for *thread_id*."""
         if self._harness_manager is None:
-            raise OctopError(ErrorCode.AGENT_NOT_FOUND, f"agent {agent_id!r} not running")
+            raise self._unavailable_error(agent_id)
         self._apply_pending_bootstrap_graph_refresh(agent_id)
         async for chunk in self._harness_manager.resume_hitl(agent_id, thread_id, decisions):
             yield chunk

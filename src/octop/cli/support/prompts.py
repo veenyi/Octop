@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable, Sequence
-from typing import Any, TypeVar, cast
-
-_T = TypeVar("_T")
+from typing import Any, cast
 
 
 def _ask(kind: str, **kwargs: Any) -> Any:
@@ -14,7 +12,7 @@ def _ask(kind: str, **kwargs: Any) -> Any:
     return getattr(questionary, kind)(**kwargs).ask()
 
 
-def _guard(callable_: Callable[[], _T]) -> _T:
+def _guard[T](callable_: Callable[[], T]) -> T:
     try:
         return callable_()
     except KeyboardInterrupt:

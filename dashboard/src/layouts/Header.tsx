@@ -1,13 +1,6 @@
 import { Layout } from "antd";
-import {
-  Menu as MenuIcon,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Github,
-} from "lucide-react";
+import { Menu as MenuIcon } from "lucide-react";
 import PwaInstallPrompt from "../components/PwaInstallPrompt";
-import pwaStyles from "../components/PwaInstallPrompt/index.module.less";
-import ThemeSwitcher from "../components/ThemeSwitcher";
 import AppVersionBadge from "../components/AppVersionBadge";
 import CurrentVersionBadge from "../components/CurrentVersionBadge";
 import { useTheme } from "../context/ThemeContext";
@@ -22,20 +15,21 @@ interface HeaderProps {
   isMobile?: boolean;
 }
 
-/** Thin top chrome: mobile brand + sidebar toggle + GitHub / Install / theme. */
-export default function Header({
-  collapsed = false,
-  onToggle,
-  isMobile,
-}: HeaderProps) {
+/**
+ * Mobile-only top chrome: brand + nav toggle + install.
+ * Desktop GitHub / theme controls moved into the account popover.
+ */
+export default function Header({ onToggle, isMobile }: HeaderProps) {
   const { isDark } = useTheme();
   const mobileLogoSrc = isDark ? "/logo_name_dark.png" : "/logo_name.png";
+
+  if (!isMobile) return null;
 
   return (
     <AntHeader
       style={{
         height: "var(--fn-header-height)",
-        padding: isMobile ? "0 12px" : "0 20px 0 4px",
+        padding: "0 12px",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
@@ -55,13 +49,13 @@ export default function Header({
           <button
             type="button"
             onClick={onToggle}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label="Open navigation"
             style={{
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              width: typeSize(34, !!isMobile),
-              height: typeSize(34, !!isMobile),
+              width: typeSize(34, true),
+              height: typeSize(34, true),
               border: "none",
               borderRadius: "var(--fn-radius-md)",
               background: "transparent",
@@ -70,79 +64,45 @@ export default function Header({
               transition: "all var(--fn-transition-fast)",
               flexShrink: 0,
             }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "var(--fn-bg-tertiary)";
-              e.currentTarget.style.color = "var(--fn-text-secondary)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "transparent";
-              e.currentTarget.style.color = "var(--fn-text-tertiary)";
-            }}
           >
-            {isMobile ? (
-              <MenuIcon size={20} strokeWidth={1.8} />
-            ) : collapsed ? (
-              <PanelLeftOpen size={18} strokeWidth={1.8} />
-            ) : (
-              <PanelLeftClose size={18} strokeWidth={1.8} />
-            )}
+            <MenuIcon size={20} strokeWidth={1.8} />
           </button>
         )}
-        {isMobile && (
-          <>
-            <img
-              src={mobileLogoSrc}
-              alt="octop"
-              style={{
-                height: 36,
-                width: "auto",
-                maxWidth: 160,
-                objectFit: "contain",
-                flexShrink: 0,
-                display: "block",
-              }}
-            />
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 4,
-                minWidth: 0,
-                flexShrink: 1,
-              }}
-            >
-              <CurrentVersionBadge isMobile />
-              <AppVersionBadge isMobile />
-            </div>
-          </>
-        )}
+        <img
+          src={mobileLogoSrc}
+          alt="octop"
+          style={{
+            height: 36,
+            width: "auto",
+            maxWidth: 160,
+            objectFit: "contain",
+            flexShrink: 0,
+            display: "block",
+          }}
+        />
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            minWidth: 0,
+            flexShrink: 1,
+          }}
+        >
+          <CurrentVersionBadge isMobile />
+          <AppVersionBadge isMobile />
+        </div>
       </div>
 
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: isMobile ? 4 : 10,
+          gap: 4,
           flexShrink: 0,
         }}
       >
-        {!isMobile && (
-          <a
-            href="https://github.com/TencentCloud/Octop"
-            target="_blank"
-            rel="noopener noreferrer"
-            className={pwaStyles.installBtn}
-          >
-            <Github
-              size={16}
-              strokeWidth={1.8}
-              className={pwaStyles.installIcon}
-            />
-            <span className={pwaStyles.label}>GitHub</span>
-          </a>
-        )}
-        <PwaInstallPrompt compact={isMobile} />
-        <ThemeSwitcher compact />
+        <PwaInstallPrompt compact />
       </div>
     </AntHeader>
   );

@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.python.org/downloads/"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white" /></a>
+  <a href="https://www.python.org/downloads/"><img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-blue?logo=python&logoColor=white" /></a>
   <a href="https://github.com/TencentCloud/Octop/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green" /></a>
   <a href="https://pypi.org/project/octop/"><img src="https://img.shields.io/pypi/v/octop" alt="PyPI" /></a>
   <a href="https://github.com/astral-sh/ruff"><img alt="Code Style: Ruff" src="https://img.shields.io/badge/code%20style-ruff-000000?logo=ruff&logoColor=white" /></a>
@@ -72,7 +72,7 @@
 
 | 层级 | 技术 |
 |------|------|
-| **语言** | Python 3.11+ |
+| **语言** | Python 3.12+ |
 | **Web 框架** | FastAPI + uvicorn |
 | **Agent 运行时** | harness-agent |
 | **IM 桥接** | harness-gateway |
@@ -419,7 +419,7 @@ tests/         unit/ + integration/
 
 ### 🛠️ 开发
 
-**前置条件：** Python 3.11+、Node 18+、[uv](https://docs.astral.sh/uv/)
+**前置条件：** Python 3.12+、Node 18+、[uv](https://docs.astral.sh/uv/)
 
 ```bash
 # 后端

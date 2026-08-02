@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
-import { PanelLeftOpen, GraduationCap } from "lucide-react";
+import { PanelLeftOpen, GraduationCap, Globe, FilePen } from "lucide-react";
 import { Tooltip } from "antd";
 import { message as antMessage } from "@/utils/antdMessage";
 
@@ -28,6 +28,7 @@ import { useChatContextWindow } from "./hooks/useChatContextWindow";
 import { useBrowserToolDetection } from "./hooks/useBrowserToolDetection";
 import { useChatFileDetection } from "./hooks/useChatFileDetection";
 import { useSkillRecordingWorkflow } from "./hooks/useSkillRecordingWorkflow";
+import { dedupeDockFilePaths } from "./utils/dockFilePath";
 import { browserApi } from "../../api/modules/browser";
 import type { TokenUsage } from "../../api/types";
 import type { ChatAttachment } from "./hooks/useChat";
@@ -44,6 +45,7 @@ import { prefetchVoiceConfig } from "../../hooks/useVoiceConfig";
 import ChatDockPanels from "./components/ChatDockPanels";
 import { ChatFilePreviewProvider } from "./ChatFilePreviewContext";
 import ChatSidebarPanel from "./components/ChatSidebarPanel";
+import ChatTitleBar from "./components/ChatTitleBar";
 import ChatComposerChrome from "./components/ChatComposerChrome";
 import { isAgentChatReady } from "../../utils/agentError";
 import { promptNeedsUserInput } from "../../utils/quickInputPrefill";
@@ -215,42 +217,35 @@ function ChatPageInner() {
 
   refreshBrowserRef.current = refreshBrowserSession;
 
-  const { filePaths } = useChatFileDetection(activeThreadId, messages);
+  const { filePaths } = useChatFileDetection(
+    activeThreadId,
+    messages,
+    resolvedAgentId,
+  );
   const {
     dockOpen,
-    dockKind,
     dockMode,
-    filePath: filePanelPath,
+    openTabs,
+    activeTabId,
     panelSizes: dockPanelSizes,
     isResizing: dockIsResizing,
     handleResizeStart: dockHandleResizeStart,
     handleClose: handleDockClose,
     handleModeChange: handleDockModeChange,
-    openFilePanel,
+    openFileList,
     openFileAt,
-    openBrowserPanel,
+    openBrowserTab,
     toggleBrowserPanel,
-    resetDismissOnSessionGone,
-  } = useChatDockPanel(isMobile);
+    closeTab: closeDockTab,
+    setActiveTab: setDockActiveTab,
+  } = useChatDockPanel(isMobile, resolvedAgentId);
 
   const panelFilePaths = useMemo(() => {
-    if (!filePanelPath) return filePaths;
-    const normalized = filePanelPath;
-    if (filePaths.some((p) => p === normalized)) return filePaths;
-    return [...filePaths, normalized];
-  }, [filePaths, filePanelPath]);
-
-  const prevBrowserStateRef = useRef<string>("idle");
-  useEffect(() => {
-    if (isMobile) return;
-    prevBrowserStateRef.current = browserSessionState;
-    resetDismissOnSessionGone(browserSessionId);
-  }, [
-    browserSessionId,
-    browserSessionState,
-    isMobile,
-    resetDismissOnSessionGone,
-  ]);
+    const fromTabs = openTabs
+      .filter((tab) => tab.kind === "file")
+      .map((tab) => tab.path);
+    return dedupeDockFilePaths([...filePaths, ...fromTabs], resolvedAgentId);
+  }, [filePaths, openTabs, resolvedAgentId]);
 
   const {
     selectedModel,
@@ -542,6 +537,28 @@ function ChatPageInner() {
     activeThreadId && !hasMessages && (historyLoading || !historyHydrated),
   );
   const showWelcome = !hasMessages && !awaitingThreadHistory;
+  const activeSession = useMemo(() => {
+    if (!activeThreadId || showWelcome) return null;
+    return (
+      sessions.find((s) => s.id === activeThreadId) ?? {
+        id: activeThreadId,
+        name: "New Chat",
+        threadId: activeThreadId,
+        updatedAt: null,
+        channelType: "dashboard",
+        isActive: true,
+        hasActivity: true,
+        pinned: false,
+      }
+    );
+  }, [activeThreadId, sessions, showWelcome]);
+
+  const activeSessionTitle = useMemo(() => {
+    if (!activeSession) return null;
+    const name = activeSession.name?.trim();
+    if (!name || name === "New Chat") return t("chatWelcome.newChat");
+    return name;
+  }, [activeSession, t]);
 
   const chatSidebarPanel = (
     <ChatSidebarPanel
@@ -588,7 +605,7 @@ function ChatPageInner() {
               : ""
           }`}
         >
-          {/* Mobile toolbar — quick actions; global Header handles logo / health / theme */}
+          {/* Mobile toolbar — session list + optional title + agent profile */}
           {isMobile && (
             <div className={styles.mobileToolbar}>
               <button
@@ -598,6 +615,11 @@ function ChatPageInner() {
               >
                 <PanelLeftOpen size={18} strokeWidth={1.8} />
               </button>
+              {activeSessionTitle && (
+                <div className={styles.mobileTitle} title={activeSessionTitle}>
+                  {activeSessionTitle}
+                </div>
+              )}
               {resolvedAgentId && (
                 <div className={styles.mobileToolbarRight}>
                   <button
@@ -611,6 +633,16 @@ function ChatPageInner() {
                 </div>
               )}
             </div>
+          )}
+
+          {!isMobile && activeSession && activeSessionTitle && (
+            <ChatTitleBar
+              session={activeSession}
+              title={activeSessionTitle}
+              onRename={renameSession}
+              onPin={pinSession}
+              onDelete={handleDeleteSession}
+            />
           )}
 
           <div className={styles.chatContent}>
@@ -647,31 +679,113 @@ function ChatPageInner() {
                 onAcpPermissionSelect={handleAcpPermissionSelect}
                 onHitlDecision={handleHitlDecision}
                 onOpenBrowser={
-                  hasBrowserTool && !isMobile ? openBrowserPanel : undefined
+                  hasBrowserTool && !isMobile ? openBrowserTab : undefined
                 }
                 onEditFile={
                   panelFilePaths.length > 0 && !isMobile
-                    ? openFilePanel
+                    ? openFileList
                     : undefined
                 }
               />
             )}
           </div>
 
-          {resolvedAgentId && !isMobile && (
-            <Tooltip title={t("chat.agentProfile.open")} mouseEnterDelay={0.35}>
-              <span className={styles.agentProfileBtnWrap}>
-                <button
-                  type="button"
-                  className={styles.agentProfileBtn}
-                  onClick={() => setAgentProfileOpen(true)}
-                  aria-label={t("chat.agentProfile.open")}
+          {!isMobile && !dockOpen && !agentProfileOpen && (
+              <div className={styles.chatFloatActions}>
+                {resolvedAgentId && (
+                  <Tooltip
+                    title={t("chat.agentProfile.open")}
+                    mouseEnterDelay={0.35}
+                    placement="left"
+                  >
+                    <span className={styles.chatFloatBtnWrap}>
+                      <button
+                        type="button"
+                        className={styles.agentProfileBtn}
+                        onClick={() => setAgentProfileOpen(true)}
+                        aria-label={t("chat.agentProfile.open")}
+                      >
+                        <GraduationCap size={20} strokeWidth={2.1} />
+                      </button>
+                    </span>
+                  </Tooltip>
+                )}
+                {panelFilePaths.length > 0 && (
+                  <Tooltip
+                    title={t("chat.modifiedFiles", {
+                      count: panelFilePaths.length,
+                      defaultValue: "已修改文件（{{count}}）",
+                    })}
+                    mouseEnterDelay={0.35}
+                    placement="left"
+                  >
+                    <span className={styles.chatFloatBtnWrap}>
+                      <button
+                        type="button"
+                        className={styles.chatFloatBtn}
+                        onClick={() => openFileList()}
+                        aria-label={t("chat.modifiedFiles", {
+                          count: panelFilePaths.length,
+                          defaultValue: "已修改文件（{{count}}）",
+                        })}
+                      >
+                        <FilePen size={20} strokeWidth={2.1} />
+                      </button>
+                      {panelFilePaths.length > 1 && (
+                        <span className={styles.chatFloatBadge}>
+                          {panelFilePaths.length > 99
+                            ? "99+"
+                            : panelFilePaths.length}
+                        </span>
+                      )}
+                    </span>
+                  </Tooltip>
+                )}
+                <Tooltip
+                  title={
+                    browserSessionId
+                      ? t("browserWorkspace.browserStatusActive", {
+                          owner:
+                            browserControlOwner === "agent"
+                              ? t("browserWorkspace.agentControl")
+                              : t("browserWorkspace.userTakeover"),
+                        })
+                      : t("browserWorkspace.browserStatusIdle")
+                  }
+                  mouseEnterDelay={0.35}
+                  placement="left"
                 >
-                  <GraduationCap size={16} strokeWidth={2.25} />
-                </button>
-              </span>
-            </Tooltip>
-          )}
+                  <span className={styles.chatFloatBtnWrap}>
+                    <button
+                      type="button"
+                      className={`${styles.browserStatusBtn} ${
+                        styles.browserStatusActive
+                      } ${
+                        browserSessionState === "awaiting_user_auth" ||
+                        browserSessionState === "authenticating"
+                          ? styles.browserStatusAuth
+                          : ""
+                      } ${
+                        browserControlOwner === "user"
+                          ? styles.browserStatusTakeover
+                          : ""
+                      }`}
+                      onClick={toggleBrowserPanel}
+                      aria-label={t("chat.openBrowser")}
+                    >
+                      <Globe size={20} strokeWidth={2.1} />
+                      {browserSessionId && (
+                        <span
+                          className={`${styles.browserStatusDot} ${
+                            styles[`browserStatus_${browserControlOwner}`]
+                          }`}
+                        />
+                      )}
+                    </button>
+                  </span>
+                </Tooltip>
+              </div>
+            )}
 
           <ChatComposerChrome sessionUsageLabel={sessionUsageLabel} />
           <ChatInput
@@ -711,47 +825,43 @@ function ChatPageInner() {
           {/* Shared dock — bottom slot (file / browser / preview) */}
           <ChatDockPanels
             slot="bottom"
-            hasBrowserTool={hasBrowserTool}
             isMobile={isMobile}
             dockOpen={dockOpen}
-            dockKind={dockKind}
             dockMode={dockMode}
             isResizing={dockIsResizing}
             panelSizes={dockPanelSizes}
             agentId={resolvedAgentId ?? ""}
             filePaths={panelFilePaths}
-            initialPath={filePanelPath}
-            browserSessionId={browserSessionId}
+            openTabs={openTabs}
+            activeTabId={activeTabId}
+            onSelectTab={setDockActiveTab}
+            onCloseTab={closeDockTab}
+            onOpenFile={openFileAt}
             browserEnvironment={browserEnvironment}
-            browserSessionState={browserSessionState}
-            browserControlOwner={browserControlOwner}
             onModeChange={handleDockModeChange}
             onClose={handleDockClose}
             onResizeStart={dockHandleResizeStart}
-            onToggleBrowser={toggleBrowserPanel}
           />
         </div>
 
         <ChatDockPanels
           slot="side"
-          hasBrowserTool={hasBrowserTool}
           isMobile={isMobile}
           dockOpen={dockOpen}
-          dockKind={dockKind}
           dockMode={dockMode}
           isResizing={dockIsResizing}
           panelSizes={dockPanelSizes}
           agentId={resolvedAgentId ?? ""}
           filePaths={panelFilePaths}
-          initialPath={filePanelPath}
-          browserSessionId={browserSessionId}
+          openTabs={openTabs}
+          activeTabId={activeTabId}
+          onSelectTab={setDockActiveTab}
+          onCloseTab={closeDockTab}
+          onOpenFile={openFileAt}
           browserEnvironment={browserEnvironment}
-          browserSessionState={browserSessionState}
-          browserControlOwner={browserControlOwner}
           onModeChange={handleDockModeChange}
           onClose={handleDockClose}
           onResizeStart={dockHandleResizeStart}
-          onToggleBrowser={toggleBrowserPanel}
         />
 
         <AgentProfileDrawer

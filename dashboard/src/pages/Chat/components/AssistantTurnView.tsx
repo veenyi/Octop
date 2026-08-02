@@ -179,7 +179,7 @@ export default function AssistantTurnView({
             turnStreaming ? styles.openBrowserPromptActive : ""
           }`}
           onClick={onEditFile}
-          aria-label={t("chat.openFile")}
+          aria-label={t("chat.editFileCard", "编辑文件")}
         >
           <FilePen
             size={16}
@@ -187,7 +187,7 @@ export default function AssistantTurnView({
             className={styles.openBrowserPromptIcon}
             aria-hidden="true"
           />
-          <span>{t("chat.openFile")}</span>
+          <span>{t("chat.editFileCard", "编辑文件")}</span>
           <ChevronRight
             size={14}
             className={styles.openBrowserPromptArrow}

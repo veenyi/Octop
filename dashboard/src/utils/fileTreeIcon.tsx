@@ -9,15 +9,23 @@ import {
   Braces,
   Code2,
   Database,
+  FileArchive,
+  FileAudio,
   FileCode,
+  FileImage,
   FileJson,
+  FileSpreadsheet,
   FileText,
+  FileType,
+  FileVideo,
   Fingerprint,
   Globe,
   Heart,
   Image,
   Key,
+  NotebookText,
   Palette,
+  Presentation,
   Rocket,
   ScrollText,
   Settings,
@@ -62,10 +70,24 @@ const NAME_MAP: Record<string, IconSpec> = {
 
 const EXT_MAP: Record<string, IconSpec> = {
   // Docs / text
-  md: { Icon: FileText, color: "#3b82f6" },
-  markdown: { Icon: FileText, color: "#3b82f6" },
+  md: { Icon: NotebookText, color: "#3b82f6" },
+  markdown: { Icon: NotebookText, color: "#3b82f6" },
   txt: { Icon: FileText, color: "#64748b" },
   rst: { Icon: FileText, color: "#64748b" },
+  pdf: { Icon: FileText, color: "#ef4444" },
+  rtf: { Icon: FileText, color: "#64748b" },
+
+  // Office
+  ppt: { Icon: Presentation, color: "#ea580c" },
+  pptx: { Icon: Presentation, color: "#ea580c" },
+  pptm: { Icon: Presentation, color: "#ea580c" },
+  doc: { Icon: FileType, color: "#2563eb" },
+  docx: { Icon: FileType, color: "#2563eb" },
+  odt: { Icon: FileType, color: "#2563eb" },
+  xls: { Icon: FileSpreadsheet, color: "#16a34a" },
+  xlsx: { Icon: FileSpreadsheet, color: "#16a34a" },
+  xlsm: { Icon: FileSpreadsheet, color: "#16a34a" },
+  ods: { Icon: FileSpreadsheet, color: "#16a34a" },
 
   // Data / config
   json: { Icon: FileJson, color: "#ca8a04" },
@@ -75,6 +97,7 @@ const EXT_MAP: Record<string, IconSpec> = {
   toml: { Icon: Settings, color: "#6b7280" },
   xml: { Icon: FileCode, color: "#ea580c" },
   csv: { Icon: Table, color: "#16a34a" },
+  tsv: { Icon: Table, color: "#16a34a" },
   env: { Icon: Key, color: "#84cc16" },
 
   // Scripts / shell
@@ -116,21 +139,34 @@ const EXT_MAP: Record<string, IconSpec> = {
   css: { Icon: Palette, color: "#264de4" },
   scss: { Icon: Palette, color: "#cd6799" },
   less: { Icon: Palette, color: "#1d365d" },
+  vue: { Icon: Code2, color: "#42b883" },
+  svelte: { Icon: Code2, color: "#ff3e00" },
 
   // Logs / misc
   log: { Icon: ScrollText, color: "#94a3b8" },
 
-  // Images / archives
-  png: { Icon: Image, color: "#8b5cf6" },
-  jpg: { Icon: Image, color: "#8b5cf6" },
-  jpeg: { Icon: Image, color: "#8b5cf6" },
-  gif: { Icon: Image, color: "#8b5cf6" },
+  // Media
+  png: { Icon: FileImage, color: "#8b5cf6" },
+  jpg: { Icon: FileImage, color: "#8b5cf6" },
+  jpeg: { Icon: FileImage, color: "#8b5cf6" },
+  gif: { Icon: FileImage, color: "#8b5cf6" },
   svg: { Icon: Image, color: "#8b5cf6" },
-  webp: { Icon: Image, color: "#8b5cf6" },
-  zip: { Icon: Archive, color: "#78716c" },
-  tar: { Icon: Archive, color: "#78716c" },
-  gz: { Icon: Archive, color: "#78716c" },
-  "7z": { Icon: Archive, color: "#78716c" },
+  webp: { Icon: FileImage, color: "#8b5cf6" },
+  ico: { Icon: FileImage, color: "#8b5cf6" },
+  mp4: { Icon: FileVideo, color: "#7c3aed" },
+  webm: { Icon: FileVideo, color: "#7c3aed" },
+  mov: { Icon: FileVideo, color: "#7c3aed" },
+  mp3: { Icon: FileAudio, color: "#0d9488" },
+  wav: { Icon: FileAudio, color: "#0d9488" },
+  m4a: { Icon: FileAudio, color: "#0d9488" },
+
+  // Archives
+  zip: { Icon: FileArchive, color: "#78716c" },
+  tar: { Icon: FileArchive, color: "#78716c" },
+  gz: { Icon: FileArchive, color: "#78716c" },
+  tgz: { Icon: FileArchive, color: "#78716c" },
+  "7z": { Icon: FileArchive, color: "#78716c" },
+  rar: { Icon: Archive, color: "#78716c" },
 };
 
 function resolveSpec(path: string): IconSpec {

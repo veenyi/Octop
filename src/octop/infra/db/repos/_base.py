@@ -27,7 +27,7 @@ def bool_int(value: bool) -> int:
     return 1 if value else 0
 
 
-def map_rows(rows: Sequence[DbRow], cls: type[_FromRow[R_co]]) -> list[R_co]:
+def map_rows[R_co](rows: Sequence[DbRow], cls: type[_FromRow[R_co]]) -> list[R_co]:
     return [cls.from_row(r) for r in rows]
 
 

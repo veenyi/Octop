@@ -1,9 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
+import {
+  collectToolMediaFromToolData,
+  workspacePathFromAccessUrl,
+} from "../../../utils/toolMediaBlocks";
 import { isWriteToolName } from "../constants";
+import {
+  canonicalizeDockFilePath,
+  dedupeDockFilePaths,
+  normalizeDockFilePath,
+} from "../utils/dockFilePath";
 import type { ChatMessage } from "./useChat";
 
 /**
- * Candidate JSON keys that may carry the written file's workspace path.
+ * Candidate JSON keys that may carry a workspace file path.
  * Harness tool schemas differ across versions, so we accept several names.
  */
 const PATH_KEYS = [
@@ -14,10 +23,11 @@ const PATH_KEYS = [
   "dest",
   "target_path",
   "output_path",
+  "source",
 ] as const;
 
 /** A conservative file-name suffix used as a last-resort path fallback. */
-const PATH_EXT_RE = /\.[A-Za-z0-9][A-Za-z0-9._+-]{0,11}$/;
+const PATH_EXT_RE = /\.[A-Za-z][A-Za-z0-9._+-]{0,11}$/;
 
 function pickPathFromObject(parsed: Record<string, unknown>): string {
   for (const key of PATH_KEYS) {
@@ -25,6 +35,17 @@ function pickPathFromObject(parsed: Record<string, unknown>): string {
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return "";
+}
+
+/** Reject version tokens (``1.0.2``) and built-in skill docs from the list. */
+function isDockListablePath(path: string): boolean {
+  const posix = path.replace(/\\/g, "/");
+  if (!posix) return false;
+  if (/(^|\/)_builtin_skills(\/|$)/i.test(posix)) return false;
+  const base = posix.split("/").filter(Boolean).pop() || posix;
+  if (/^[\d.]+$/.test(base)) return false;
+  if (!PATH_EXT_RE.test(base)) return false;
+  return true;
 }
 
 /**
@@ -59,14 +80,27 @@ function pathFromArgs(raw: unknown): string {
  */
 function pathFromText(text: string): string {
   if (!text) return "";
-  const absMatch = text.match(/\/\.octop\/agents\/[^\s"'<>]+/i);
+  // Prefer full absolute path ending at ``/.octop/agents/…`` (keep ``/home/…``).
+  const absMatch = text.match(
+    /(?:\/[\w.-]+)*\/\.octop\/agents\/[^\s"'<>]+/i,
+  );
   if (absMatch) return absMatch[0];
-  const relMatch = text.match(/(?:^|\s)([^\s"'<>]+\.[A-Za-z0-9]{1,8})(?=\s|$)/);
-  if (relMatch && PATH_EXT_RE.test(relMatch[1])) return relMatch[1];
+  const outbound = text.match(
+    /(?:^|[\s"'`])((?:outbound|inbound)\/[^\s"'<>]+)/i,
+  );
+  if (outbound) return outbound[1];
+  const relMatch = text.match(
+    /(?:^|\s)((?:generated|outbound|inbound)\/[^\s"'<>]+)/i,
+  );
+  if (relMatch) return relMatch[1];
+  const fileMatch = text.match(
+    /(?:^|\s)([^\s"'<>]+\/[^\s"'<>]+\.[A-Za-z][A-Za-z0-9._+-]{0,11})(?=\s|$)/,
+  );
+  if (fileMatch && isDockListablePath(fileMatch[1])) return fileMatch[1];
   return "";
 }
 
-function extractFilePath(message: ChatMessage): string | null {
+function extractWriteToolPath(message: ChatMessage): string | null {
   const name = message.toolData?.name ?? "";
   if (!isWriteToolName(name)) return null;
 
@@ -85,27 +119,79 @@ function extractFilePath(message: ChatMessage): string | null {
   return null;
 }
 
+function addPath(
+  paths: string[],
+  path: string | null,
+  agentId?: string | null,
+) {
+  const key = path ? canonicalizeDockFilePath(path, agentId) : "";
+  if (!key || !isDockListablePath(key)) return;
+  // Keep the original (richer) path for folder display; dedupe collapses later.
+  paths.push(normalizeDockFilePath(path!) || key);
+}
+
 /**
- * Collect workspace file paths written by the active thread's write/edit tool
- * calls so the chat can open them in the docked file panel.
+ * Collect workspace file paths from the active thread so the docked file
+ * panel can switch among written / previewable / attached files together.
  */
 export function useChatFileDetection(
   _activeThreadId: string | null,
   messages: ChatMessage[],
+  agentId?: string | null,
 ) {
   const [filePaths, setFilePaths] = useState<string[]>([]);
-  const collect = useCallback((msgs: ChatMessage[]): string[] => {
-    const paths: string[] = [];
-    const seen = new Set<string>();
-    for (const m of msgs) {
-      const path = extractFilePath(m);
-      if (path && !seen.has(path)) {
-        seen.add(path);
-        paths.push(path);
+  const collect = useCallback(
+    (msgs: ChatMessage[]): string[] => {
+      const paths: string[] = [];
+
+      for (const m of msgs) {
+        // Write / edit / send tools only — avoid listing every read_file skill doc.
+        addPath(paths, extractWriteToolPath(m), agentId);
+
+        for (const att of m.attachments ?? []) {
+          if (att.workspacePath) {
+            addPath(paths, att.workspacePath, agentId);
+          } else if (att.url) {
+            addPath(
+              paths,
+              workspacePathFromAccessUrl(att.url) ?? null,
+              agentId,
+            );
+          }
+        }
+
+        const media = collectToolMediaFromToolData(
+          m.toolData,
+          agentId,
+          m.attachments,
+        );
+        for (const file of media.files) {
+          addPath(
+            paths,
+            workspacePathFromAccessUrl(file.url) ?? null,
+            agentId,
+          );
+        }
+        for (const img of media.images) {
+          addPath(
+            paths,
+            workspacePathFromAccessUrl(img.url) ?? null,
+            agentId,
+          );
+        }
+        for (const video of media.videos) {
+          addPath(
+            paths,
+            workspacePathFromAccessUrl(video.url) ?? null,
+            agentId,
+          );
+        }
       }
-    }
-    return paths;
-  }, []);
+
+      return dedupeDockFilePaths(paths, agentId);
+    },
+    [agentId],
+  );
 
   useEffect(() => {
     setFilePaths(collect(messages));

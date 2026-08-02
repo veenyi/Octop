@@ -85,7 +85,7 @@ Octop 安装脚本 (macOS / Linux)
   --from-source [目录]  从源码安装；未指定目录时从 git 仓库克隆
   --from-pypi           从 PyPI 安装（默认）
   --extras <附加组件>   额外可选组件（例如 desktop）；browser/playwright 默认安装
-  --mirror <镜像URL>    指定 PyPI 镜像（例如 https://mirrors.aliyun.com/pypi/simple）
+  --mirror <镜像URL>    指定 PyPI 镜像（例如 https://mirrors.cloud.tencent.com/pypi/simple）
   -h, --help            显示此帮助
 
 说明: 若系统已安装 Chrome/Chromium（常见于 macOS/Windows 或 Linux 桌面），
@@ -138,10 +138,10 @@ _install_uv_via_pip() {
     local install_dir="$HOME/.local/bin"
     mkdir -p "$install_dir"
 
+    # 不使用清华/中科大镜像：部分环境拉 wheel 会 302 到 TUNA 并返回 403
     local mirrors=(
         "https://mirrors.cloud.tencent.com/pypi/simple"
         "https://mirrors.aliyun.com/pypi/simple"
-        "https://pypi.tuna.tsinghua.edu.cn/simple"
     )
     for mirror in "${mirrors[@]}"; do
         local host
@@ -226,30 +226,97 @@ ensure_uv() {
 ensure_uv
 
 # ── 选择最快的 PyPI 镜像 ──────────────────────────────────────────────────────
+# 仅保留实测可用的国内源。清华 TUNA / 中科大 USTC 在部分网络下拉 wheel
+# 会 302 到 TUNA 并 403，导致 uv pip install 失败，故不再作为候选。
 _PYPI_MIRRORS=(
     "https://mirrors.cloud.tencent.com/pypi/simple"
     "https://mirrors.aliyun.com/pypi/simple"
-    "https://pypi.tuna.tsinghua.edu.cn/simple"
-    "https://mirrors.ustc.edu.cn/pypi/simple"
 )
 _FASTEST_MIRROR=""
 _select_fastest_pypi_mirror() {
     local best_mirror="${_PYPI_MIRRORS[0]}"
     local best_time=9999
+    local found=0
     info "正在测速 PyPI 镜像..."
     for mirror in "${_PYPI_MIRRORS[@]}"; do
-        local t t_ms
-        t="$(curl -o /dev/null -s -w '%{time_connect}' \
+        local t t_ms code
+        # 同时校验 HTTP 状态：连通快但返回非 2xx 的源不可用
+        code="$(curl -o /dev/null -s -w '%{http_code}' \
+            --connect-timeout 3 --max-time 5 \
+            "$mirror/pip/" 2>/dev/null || echo '000')"
+        case "$code" in
+            2*) ;;
+            *)
+                warn "镜像不可用 (HTTP $code)，跳过: $mirror"
+                continue
+                ;;
+        esac
+        t="$(curl -o /dev/null -s -w '%{time_total}' \
             --connect-timeout 3 --max-time 5 \
             "$mirror/pip/" 2>/dev/null || echo '9999')"
         t_ms="$(echo "$t" | awk '{printf "%d", $1*1000}')"
         if [ "$t_ms" -lt "$best_time" ] 2>/dev/null; then
             best_time="$t_ms"
             best_mirror="$mirror"
+            found=1
         fi
     done
+    if [ "$found" -eq 0 ]; then
+        warn "未找到可用国内镜像，将仅使用官方 PyPI"
+        _FASTEST_MIRROR=""
+        return
+    fi
     info "最快镜像: $best_mirror (${best_time}ms)"
     _FASTEST_MIRROR="$best_mirror"
+}
+
+# 按候选镜像依次尝试 uv pip install；失败则换源，最后回退官方 PyPI。
+# 参数：包规格（可含 extras） + 额外 uv 参数（如 --prerelease=explicit）
+_uv_pip_install_with_mirror_fallback() {
+    local package="$1"
+    shift
+    local -a candidates=()
+    local m
+
+    if [ -n "${_EXTRA_MIRROR:-}" ]; then
+        candidates+=("$_EXTRA_MIRROR")
+    fi
+    for m in "${_PYPI_MIRRORS[@]}"; do
+        if [ -n "$m" ] && [ "$m" != "${_EXTRA_MIRROR:-}" ]; then
+            candidates+=("$m")
+        fi
+    done
+    candidates+=("")  # 官方 PyPI only
+
+    local mirror
+    local -a seen=()
+    for mirror in "${candidates[@]}"; do
+        local dup=0 s
+        for s in "${seen[@]+"${seen[@]}"}"; do
+            [ "$s" = "$mirror" ] && { dup=1; break; }
+        done
+        [ "$dup" -eq 1 ] && continue
+        seen+=("$mirror")
+
+        local -a args=(
+            --python "$OCTOP_VENV/bin/python"
+            --quiet
+            --index-url https://pypi.org/simple
+        )
+        if [ -n "$mirror" ]; then
+            args+=(--extra-index-url "$mirror")
+            info "尝试依赖加速镜像: $mirror"
+        else
+            info "尝试仅使用官方 PyPI（无镜像加速）..."
+        fi
+
+        if UV_SYSTEM_PYTHON=0 uv pip install "$package" "${args[@]}" "$@"; then
+            _EXTRA_MIRROR="$mirror"
+            return 0
+        fi
+        warn "该源安装失败，尝试下一镜像..."
+    done
+    return 1
 }
 
 # ── glibc / 旧发行版：部分依赖（如 tiktoken）仅提供 manylinux_2_28+ wheel ──
@@ -552,6 +619,18 @@ prepare_console() {
     fi
 }
 
+# TEMP: mcp 2.x 移除 RequestContext，与 langchain-mcp-adapters 不兼容。
+# harness-agent>=0.9.18 已在依赖中 pin；此处在验证前再钉一次，覆盖仍拉取到
+# 旧版 harness / 镜像滞后的安装路径。待 Octop 发版跟上后可删除。
+_pin_mcp_compat() {
+    info "正在固定 mcp<2（兼容 langchain-mcp-adapters；临时措施）..."
+    if ! _uv_pip_install_with_mirror_fallback "mcp>=1.27.1,<2"; then
+        warn "mcp 版本固定失败，安装验证可能会失败"
+        return 1
+    fi
+    return 0
+}
+
 _verify_install() {
     info "正在验证安装..."
     if ! "$OCTOP_VENV/bin/python" -c "from octop.infra.agents.manager import AgentManager" 2>/dev/null; then
@@ -589,19 +668,20 @@ else
     [ -n "$VERSION" ] && PACKAGE="octop==$VERSION"
 
     info "正在从 PyPI 安装 ${PACKAGE}${EXTRAS_SUFFIX}..."
-    info "主源: https://pypi.org/simple  依赖加速: $_EXTRA_MIRROR"
-    install_args=(
-        --python "$OCTOP_VENV/bin/python"
-        --quiet
-        --index-url https://pypi.org/simple
-        --extra-index-url "$_EXTRA_MIRROR"
-    )
-    if [ -n "$VERSION" ] && [[ "$VERSION" =~ (dev|a|b|rc) ]]; then
-        install_args+=(--prerelease=explicit)
+    if [ -n "${_EXTRA_MIRROR:-}" ]; then
+        info "主源: https://pypi.org/simple  首选加速: $_EXTRA_MIRROR"
+    else
+        info "主源: https://pypi.org/simple"
     fi
-    UV_SYSTEM_PYTHON=0 uv pip install "${PACKAGE}${EXTRAS_SUFFIX}" "${install_args[@]}"
+    _PYPI_EXTRA_ARGS=()
+    if [ -n "$VERSION" ] && [[ "$VERSION" =~ (dev|a|b|rc) ]]; then
+        _PYPI_EXTRA_ARGS+=(--prerelease=explicit)
+    fi
+    _uv_pip_install_with_mirror_fallback "${PACKAGE}${EXTRAS_SUFFIX}" ${_PYPI_EXTRA_ARGS[@]+"${_PYPI_EXTRA_ARGS[@]}"} \
+        || die "从 PyPI 安装失败（已尝试国内镜像与官方源）"
 fi
 
+_pin_mcp_compat || true
 _verify_install
 
 [ -x "$OCTOP_VENV/bin/octop" ] || die "安装失败: 在虚拟环境中未找到 octop CLI"

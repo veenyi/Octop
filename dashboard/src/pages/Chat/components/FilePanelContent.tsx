@@ -6,10 +6,18 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Button, Select, Tooltip, Segmented } from "antd";
+import { Tooltip } from "antd";
 import { message } from "@/utils/antdMessage";
 
-import { Pencil, Save, ArrowDownToLine, RefreshCw, FileX } from "lucide-react";
+import {
+  Pencil,
+  Save,
+  ArrowDownToLine,
+  RefreshCw,
+  FileX,
+  Eye,
+  Code2,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { probeAuthResource, request, requestBlob } from "../../../api/request";
 import { isNotFoundApiError } from "../../../utils/apiError";
@@ -22,86 +30,32 @@ import {
   previewNeedsFillLayout,
   defaultPreviewMode,
 } from "../../Agent/Workspace/components/FilePreview";
+import {
+  dockFileBasename,
+  normalizeDockFilePath,
+  toWorkspaceApiPath,
+} from "../utils/dockFilePath";
 import styles from "../index.module.less";
-
-/** Keep tool path shape: absolute stays absolute, relative stays relative. */
-function panelFilePath(raw: string): string {
-  const trimmed = raw.trim();
-  if (trimmed.toLowerCase().startsWith("file://")) {
-    let abs = trimmed.slice("file://".length);
-    if (abs.startsWith("//")) abs = abs.slice(1);
-    return abs.startsWith("/") || /^[A-Za-z]:/.test(abs) ? abs : `/${abs}`;
-  }
-  return trimmed;
-}
-
-/** Display basename for dock title / select labels. */
-function fileBasename(path: string): string {
-  const normalized = path.replace(/\\/g, "/");
-  const parts = normalized.split("/").filter(Boolean);
-  return parts[parts.length - 1] || path;
-}
-
-/** Legacy ``/outbound|inbound/…`` keys are workspace-relative, not host roots. */
-function isLegacyWorkspaceSlashPath(path: string): boolean {
-  const raw = path.replace(/\\/g, "/");
-  return (
-    raw.startsWith("/outbound/") ||
-    raw.startsWith("/inbound/") ||
-    raw === "/outbound" ||
-    raw === "/inbound"
-  );
-}
-
-/** Path + query for agent workspace file/download APIs. */
-function panelApiRequestPath(resolvedPath: string): string {
-  const raw = resolvedPath.trim();
-  if (!raw) return raw;
-  if (raw.toLowerCase().startsWith("file://")) {
-    return raw;
-  }
-  if (isLegacyWorkspaceSlashPath(raw)) {
-    return raw.replace(/\\/g, "/").replace(/^\//, "");
-  }
-  if (raw.startsWith("/") || /^[A-Za-z]:/.test(raw)) {
-    return raw.startsWith("/") ? `file://${raw}` : `file:///${raw}`;
-  }
-  return raw;
-}
-
-export interface FilePanelChrome {
-  title: ReactNode;
-  actions: ReactNode;
-}
 
 interface FilePanelContentProps {
   agentId: string;
-  /** All workspace files written by the agent in this thread. */
-  filePaths: string[];
-  /** When set, opens on this path instead of the latest written one. */
-  initialPath?: string | null;
-  /** Lift title + actions into the shared dock shell toolbar. */
-  onChromeChange?: (chrome: FilePanelChrome | null) => void;
+  /** Single workspace file path for this tab. */
+  filePath: string;
+  /** Lift toolbar actions into the shared dock shell (active tab only). */
+  onActionsChange?: (actions: ReactNode | null) => void;
 }
 
 /**
- * Shared file viewer/editor body used by the docked ``FilePanel`` (write/edit
- * tool results and preview/download cards). Paths are passed through as the
- * tool reported them — no collapsing absolute → relative.
+ * Shared file viewer/editor body used by a dock file tab (write/edit/send
+ * tool results and preview/download cards).
  */
 export default function FilePanelContent({
   agentId,
-  filePaths,
-  initialPath,
-  onChromeChange,
+  filePath,
+  onActionsChange,
 }: FilePanelContentProps) {
   const { t } = useTranslation();
-  const normalizedPaths = useMemo(
-    () => filePaths.map((p) => panelFilePath(p)),
-    [filePaths],
-  );
-  const normalizedInitial = initialPath ? panelFilePath(initialPath) : null;
-  const [selectedPath, setSelectedPath] = useState<string>("");
+  const resolvedPath = normalizeDockFilePath(filePath);
   const [content, setContent] = useState<string>("");
   const [editMode, setEditMode] = useState(false);
   const [previewMode, setPreviewMode] = useState(true);
@@ -109,19 +63,6 @@ export default function FilePanelContent({
   const [fileMissing, setFileMissing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
-
-  // Preview/download cards pass a fresh initialPath; sync selection to it.
-  useEffect(() => {
-    if (normalizedInitial) {
-      setSelectedPath(normalizedInitial);
-    }
-  }, [normalizedInitial]);
-
-  const resolvedPath =
-    selectedPath ||
-    normalizedInitial ||
-    normalizedPaths[normalizedPaths.length - 1] ||
-    "";
 
   const docKind = resolvedPath ? getDocKind(resolvedPath) : null;
   const mediaKind = resolvedPath ? getMediaKind(resolvedPath) : null;
@@ -136,7 +77,7 @@ export default function FilePanelContent({
     !fileMissing;
 
   const apiFilePath = useMemo(
-    () => panelApiRequestPath(resolvedPath),
+    () => toWorkspaceApiPath(resolvedPath),
     [resolvedPath],
   );
 
@@ -247,7 +188,7 @@ export default function FilePanelContent({
       );
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = fileBasename(resolvedPath) || "download";
+      a.download = dockFileBasename(resolvedPath) || "download";
       a.click();
       URL.revokeObjectURL(a.href);
     } catch (err: unknown) {
@@ -270,41 +211,37 @@ export default function FilePanelContent({
       (previewMode && previewNeedsFillLayout(previewKind)));
 
   useLayoutEffect(() => {
-    if (!onChromeChange) return;
-
-    const title =
-      normalizedPaths.length > 1 ? (
-        <Select
-          size="small"
-          value={resolvedPath}
-          onChange={setSelectedPath}
-          className={styles.fileModalSelect}
-          aria-label={t("chat.fileSwitch", "切换文件")}
-          options={normalizedPaths.map((p) => ({
-            value: p,
-            label: fileBasename(p),
-            title: p,
-          }))}
-          title={resolvedPath}
-        />
-      ) : resolvedPath ? (
-        <span className={styles.fileModalName} title={resolvedPath}>
-          {fileBasename(resolvedPath)}
-        </span>
-      ) : null;
+    if (!onActionsChange) return;
 
     const actions = (
       <>
         {showPreviewToggle && (
-          <Segmented
-            size="small"
-            value={previewMode ? "preview" : "source"}
-            options={[
-              { label: t("common.preview"), value: "preview" },
-              { label: t("workspace.source", "源码"), value: "source" },
-            ]}
-            onChange={(v) => setPreviewMode(v === "preview")}
-          />
+          <Tooltip
+            title={
+              previewMode
+                ? t("workspace.source", "源码")
+                : t("common.preview")
+            }
+          >
+            <button
+              type="button"
+              className={`${styles.fileModalIconBtn} ${
+                previewMode ? styles.fileModalIconBtnActive : ""
+              }`}
+              onClick={() => setPreviewMode((v) => !v)}
+              aria-label={
+                previewMode
+                  ? t("workspace.source", "源码")
+                  : t("common.preview")
+              }
+            >
+              {previewMode ? (
+                <Code2 size={16} strokeWidth={2} />
+              ) : (
+                <Eye size={16} strokeWidth={2} />
+              )}
+            </button>
+          </Tooltip>
         )}
         <Tooltip title={t("common.refresh")}>
           <button
@@ -330,31 +267,38 @@ export default function FilePanelContent({
         </Tooltip>
         {showEditButton &&
           (editMode ? (
-            <Button
-              size="small"
-              type="primary"
-              icon={<Save size={14} />}
-              loading={saving}
-              onClick={() => void save()}
-            >
-              {t("common.save")}
-            </Button>
+            <Tooltip title={t("common.save")}>
+              <button
+                type="button"
+                className={`${styles.fileModalIconBtn} ${styles.fileModalIconBtnPrimary}`}
+                onClick={() => void save()}
+                disabled={saving}
+                aria-label={t("common.save")}
+              >
+                <Save size={16} strokeWidth={2} />
+              </button>
+            </Tooltip>
           ) : (
-            <Button
-              size="small"
-              icon={<Pencil size={14} />}
-              onClick={() => setEditMode(true)}
-            >
-              {t("common.edit")}
-            </Button>
+            <Tooltip title={t("common.edit")}>
+              <button
+                type="button"
+                className={styles.fileModalIconBtn}
+                onClick={() => {
+                  setPreviewMode(false);
+                  setEditMode(true);
+                }}
+                aria-label={t("common.edit")}
+              >
+                <Pencil size={16} strokeWidth={2} />
+              </button>
+            </Tooltip>
           ))}
       </>
     );
 
-    onChromeChange({ title, actions });
+    onActionsChange(actions);
   }, [
-    onChromeChange,
-    normalizedPaths,
+    onActionsChange,
     resolvedPath,
     showPreviewToggle,
     previewMode,
@@ -371,9 +315,9 @@ export default function FilePanelContent({
 
   useEffect(() => {
     return () => {
-      onChromeChange?.(null);
+      onActionsChange?.(null);
     };
-  }, [onChromeChange]);
+  }, [onActionsChange]);
 
   return (
     <div className={styles.filePanelBody}>

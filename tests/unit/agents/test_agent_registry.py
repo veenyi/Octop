@@ -453,16 +453,55 @@ async def test_update_raises_for_unknown_id(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_get_agent_raises_for_unknown(tmp_path: Path) -> None:
-    """get_agent() raises OctopError when harness has no such entry."""
-    from octop.infra.errors import OctopError  # noqa: PLC0415
+    """get_agent() raises AGENT_NOT_FOUND when no agent row exists."""
+    from octop.infra.errors import ErrorCode, OctopError  # noqa: PLC0415
 
     services = _make_services(tmp_path)
     fake_hm = _make_fake_hm()
     fake_hm.get_agent.side_effect = KeyError("missing")
     registry = _make_registry(services, fake_hm=fake_hm)
 
-    with pytest.raises(OctopError):
+    with pytest.raises(OctopError) as exc_info:
         registry.get_agent("no-such-id")
+    assert exc_info.value.code is ErrorCode.AGENT_NOT_FOUND
+
+
+@pytest.mark.asyncio
+async def test_get_agent_raises_not_running_for_stopped_row(tmp_path: Path) -> None:
+    """Stopped agents report AGENT_NOT_RUNNING, not AGENT_NOT_FOUND."""
+    from octop.infra.errors import ErrorCode, OctopError  # noqa: PLC0415
+
+    services = _make_services(tmp_path)
+    fake_hm = _make_fake_hm()
+    fake_hm.get_agent.side_effect = KeyError("missing")
+    registry = _attach_registry(services, fake_hm=fake_hm)
+    _bootstrap_factory_from_db(registry, fake_hm)
+
+    row = await registry.create(AgentCreateSpec(name="paused"))
+    await registry.stop(row.agent_id)
+
+    with pytest.raises(OctopError) as exc_info:
+        registry.get_agent(row.agent_id)
+    assert exc_info.value.code is ErrorCode.AGENT_NOT_RUNNING
+
+
+@pytest.mark.asyncio
+async def test_get_agent_raises_failed_for_failed_row(tmp_path: Path) -> None:
+    """Failed agents report AGENT_FAILED instead of not-found."""
+    from octop.infra.errors import ErrorCode, OctopError  # noqa: PLC0415
+
+    services = _make_services(tmp_path)
+    fake_hm = _make_fake_hm()
+    fake_hm.get_agent.side_effect = KeyError("missing")
+    registry = _attach_registry(services, fake_hm=fake_hm)
+    _bootstrap_factory_from_db(registry, fake_hm)
+
+    row = await registry.create(AgentCreateSpec(name="broken"))
+    services.repos.agent_repo.set_state(row.agent_id, "failed", error="boom")
+
+    with pytest.raises(OctopError) as exc_info:
+        registry.get_agent(row.agent_id)
+    assert exc_info.value.code is ErrorCode.AGENT_FAILED
 
 
 @pytest.mark.asyncio

@@ -351,6 +351,14 @@ function convertCallEntries(entries: CallEntry[]): ChatMessage[] {
         };
         continue;
       }
+      // Unmatched tool results still belong to the assistant turn — keep them
+      // as assistant so history grouping does not split process summaries.
+      merged.push({ ...current, role: "assistant" });
+      continue;
+    }
+    if (current.role === "tool" && current.toolData) {
+      merged.push({ ...current, role: "assistant" });
+      continue;
     }
     merged.push(current);
   }
