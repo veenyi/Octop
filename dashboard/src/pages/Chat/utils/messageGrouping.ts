@@ -5,7 +5,18 @@ export interface MessageGroup {
   messages: ChatMessage[];
 }
 
-/** Group consecutive assistant messages for unified turn rendering. */
+/** Roles that belong to an assistant ReAct turn (must not split the group). */
+function isAssistantTurnRole(role: string): boolean {
+  return role === "assistant" || role === "tool";
+}
+
+/**
+ * Group consecutive assistant-turn messages for unified turn rendering.
+ *
+ * History loads often keep unmatched ``tool``-role rows between AI steps;
+ * treating them as turn breakers produced multiple process summaries for one
+ * user round-trip. Keep ``tool`` inside the assistant group.
+ */
 export function groupConsecutiveAssistantMessages(
   messages: ChatMessage[],
 ): MessageGroup[] {
@@ -13,7 +24,7 @@ export function groupConsecutiveAssistantMessages(
   let currentGroup: ChatMessage[] = [];
 
   for (const msg of messages) {
-    if (msg.role === "assistant") {
+    if (isAssistantTurnRole(msg.role)) {
       currentGroup.push(msg);
     } else {
       if (currentGroup.length > 0) {

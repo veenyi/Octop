@@ -1,10 +1,9 @@
 import { memo, useCallback, useMemo, useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { Dropdown, Tooltip } from "antd";
+import { Dropdown } from "antd";
 import type { MenuProps } from "antd";
 import {
-  MessageSquare,
   Pencil,
   MoreHorizontal,
   Trash2,
@@ -17,46 +16,8 @@ import type { OctopAgent } from "../../../context/AgentContext";
 import { isAgentChatReady } from "../../../utils/agentError";
 import { showConfirmModal } from "../../../utils/confirmModal";
 import { iconForName } from "../../Experts/components/iconForName";
-import {
-  CHANNEL_ICONS,
-  CHANNEL_LABEL_KEYS,
-  CHANNEL_LABELS,
-  type ChannelKey,
-} from "../../Agent/Channels/components/constants";
+import SessionChannelIcon from "./SessionChannelIcon";
 import styles from "../index.module.less";
-
-function isChannelKey(value: string): value is ChannelKey {
-  return Object.prototype.hasOwnProperty.call(CHANNEL_ICONS, value);
-}
-
-function SessionRowIcon({ channelType }: { channelType: string }) {
-  const { t } = useTranslation();
-  if (channelType === "dashboard") {
-    return (
-      <MessageSquare
-        size={12}
-        className={styles.sessionRowIcon}
-        strokeWidth={1.75}
-      />
-    );
-  }
-  const label = isChannelKey(channelType)
-    ? t(CHANNEL_LABEL_KEYS[channelType], CHANNEL_LABELS[channelType])
-    : channelType;
-  const iconSrc = isChannelKey(channelType)
-    ? CHANNEL_ICONS[channelType]
-    : CHANNEL_ICONS.octopbot;
-  return (
-    <Tooltip title={label} mouseEnterDelay={0.35}>
-      <img
-        src={iconSrc}
-        alt=""
-        className={`${styles.sessionRowIcon} ${styles.sessionRowChannelIcon}`}
-        aria-label={label}
-      />
-    </Tooltip>
-  );
-}
 
 function AgentUnreadBadge({ count }: { count: number }) {
   const { t } = useTranslation();
@@ -169,7 +130,11 @@ const SessionItem = memo(function SessionItem({
         if (e.key === "Enter" && !isEditing) onSelect(session.id);
       }}
     >
-      <SessionRowIcon channelType={session.channelType} />
+      <SessionChannelIcon
+        channelType={session.channelType}
+        size={12}
+        className={styles.sessionRowIcon}
+      />
       {isEditing ? (
         <input
           ref={inputRef}

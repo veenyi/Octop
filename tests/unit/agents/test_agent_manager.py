@@ -19,7 +19,7 @@ from octop.infra.db.migrate import run_migrations
 from octop.infra.db.pool import SqlitePool
 from octop.infra.db.repos.agents import AgentRow
 from octop.infra.db.services import build_shared_services
-from octop.infra.errors import OctopError
+from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.utils.paths import PathLayout
 
 
@@ -562,8 +562,9 @@ async def test_stop_and_start_round_trip(manager: AgentManager) -> None:
     await manager.stop("STOP01")
     assert manager.get_row("STOP01") is not None
     assert manager.get_row("STOP01").last_state == "stopped"
-    with pytest.raises(OctopError, match="not running"):
+    with pytest.raises(OctopError, match="not running") as stopped_exc:
         manager.get_agent("STOP01")
+    assert stopped_exc.value.code is ErrorCode.AGENT_NOT_RUNNING
 
     await manager.start("STOP01")
     assert manager.get_row("STOP01") is not None
@@ -613,8 +614,9 @@ async def test_reload_skips_stopped_agent(manager: AgentManager) -> None:
     await manager.reload("SKIP01")
     assert manager.get_row("SKIP01") is not None
     assert manager.get_row("SKIP01").last_state == "stopped"
-    with pytest.raises(OctopError, match="not running"):
+    with pytest.raises(OctopError, match="not running") as skipped_exc:
         manager.get_agent("SKIP01")
+    assert skipped_exc.value.code is ErrorCode.AGENT_NOT_RUNNING
 
     manager._harness_manager.close()
 

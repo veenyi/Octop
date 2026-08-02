@@ -152,6 +152,15 @@ if (-not (Test-Path $VenvPython)) { Stop-WithError "Failed to create virtual env
 $pyVersion = & $VenvPython --version 2>&1
 Write-Info "Python environment ready ($pyVersion)"
 
+# TEMP: mcp 2.x breaks langchain-mcp-adapters; pin until published octop pulls harness-agent>=0.9.18.
+function Pin-McpCompat {
+    Write-Info "Pinning mcp<2 (langchain-mcp-adapters compat; temporary)..."
+    uv pip install "mcp>=1.27.1,<2" --python $VenvPython --quiet
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "Failed to pin mcp; install verification may fail"
+    }
+}
+
 function Test-Install {
     Write-Info "Verifying installation..."
     & $VenvPython -c "from octop.infra.agents.manager import AgentManager" 2>$null
@@ -231,6 +240,7 @@ if ($FromSource) {
     uv pip install "${package}${ExtrasSuffix}" @installArgs
 }
 
+Pin-McpCompat
 Test-Install
 
 if (-not (Test-Path $VenvOctop)) { Stop-WithError "Installation failed: octop CLI not found in venv" }

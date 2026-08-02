@@ -10,19 +10,19 @@
 #   docker run -d -p 8088:8088 -v octop-data:/data/.octop -e HOME=/data octop:latest
 #
 # 国内加速（可选，需 BuildKit，docker/docker_build.sh 默认已开启）:
-#   PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple \
-#   PIP_TRUSTED_HOST=mirrors.aliyun.com \
-#   NPM_REGISTRY=https://registry.npmmirror.com \
-#   APT_MIRROR=mirrors.aliyun.com \
+#   PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple \
+#   PIP_TRUSTED_HOST=mirrors.cloud.tencent.com \
+#   NPM_REGISTRY=https://mirrors.cloud.tencent.com/npm/ \
+#   APT_MIRROR=mirrors.cloud.tencent.com \
 #   bash docker/docker_build.sh
 #
 # 或直接传 build-arg:
 #   docker build \
 #     -f docker/Dockerfile \
-#     --build-arg PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple \
-#     --build-arg PIP_TRUSTED_HOST=mirrors.aliyun.com \
-#     --build-arg NPM_REGISTRY=https://registry.npmmirror.com \
-#     --build-arg APT_MIRROR=mirrors.aliyun.com \
+#     --build-arg PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple \
+#     --build-arg PIP_TRUSTED_HOST=mirrors.cloud.tencent.com \
+#     --build-arg NPM_REGISTRY=https://mirrors.cloud.tencent.com/npm/ \
+#     --build-arg APT_MIRROR=mirrors.cloud.tencent.com \
 #     --build-arg NODE_MAX_OLD_SPACE_SIZE=1024 \
 #     -t octop:latest .
 #

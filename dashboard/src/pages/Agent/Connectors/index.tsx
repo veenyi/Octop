@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Drawer, Form, Input, Select, Spin } from "antd";
 import { message } from "@/utils/antdMessage";
 
@@ -18,6 +18,11 @@ import { useSearchParams } from "react-router-dom";
 import PageShell from "../../../layouts/PageShell";
 import { useUserRole } from "../../../hooks/useUserRole";
 import { apiErrorMessage } from "../../../utils/apiError";
+import {
+  clearFormDraft,
+  loadFormDraft,
+  saveFormDraft,
+} from "../../../utils/formDraft";
 import {
   connectorsApi,
   type ConnectorAuthInfo,
@@ -257,6 +262,21 @@ function ConnectorConfigDrawer({
   const hasStoredCredentials = Boolean(instance?.has_credentials);
   const mailProvider = Form.useWatch("mail_provider", form) ?? "qq";
   const selectedMailProvider = mailProviderById(String(mailProvider));
+  const draftScope = entry
+    ? instance
+      ? `connector:${instance.instance_id}`
+      : `connector:new:${entry.kind}`
+    : "";
+  const restoringDraftRef = useRef(false);
+
+  const applyConnectorDraft = useCallback(() => {
+    if (!draftScope) return;
+    const draft = loadFormDraft(draftScope);
+    if (!draft) return;
+    restoringDraftRef.current = true;
+    form.setFieldsValue(draft);
+    restoringDraftRef.current = false;
+  }, [draftScope, form]);
 
   useEffect(() => {
     if (!open || !entry) return;
@@ -315,15 +335,19 @@ function ConnectorConfigDrawer({
               detail.credentials_preview.user_refresh_expires_at ?? null,
             );
           }
+          applyConnectorDraft();
         })
         .catch(() => {
           form.setFieldsValue({
             display_name: instance.display_name || entry.name,
           });
+          applyConnectorDraft();
         })
         .finally(() => setLoadingDetail(false));
+    } else {
+      applyConnectorDraft();
     }
-  }, [open, entry, instance, form]);
+  }, [open, entry, instance, form, applyConnectorDraft]);
 
   const openUrl = (url: string | null | undefined) => {
     if (!url) return;
@@ -807,6 +831,7 @@ function ConnectorConfigDrawer({
           ? t("connectors.saveSuccess", "连接器已保存")
           : t("connectors.createSuccess", "连接器已创建"),
       );
+      clearFormDraft(draftScope);
       onSaved();
       onClose();
     } catch (e) {
@@ -1074,7 +1099,15 @@ function ConnectorConfigDrawer({
           </div>
         )}
 
-        <Form form={form} layout="vertical">
+        <Form
+          form={form}
+          layout="vertical"
+          onValuesChange={(_, all) => {
+            if (!restoringDraftRef.current && draftScope) {
+              saveFormDraft(draftScope, all as unknown as Record<string, unknown>);
+            }
+          }}
+        >
           <div className={styles.configSectionTitle}>
             {t("connectors.configSection", "连接配置")}
           </div>

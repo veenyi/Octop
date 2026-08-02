@@ -48,9 +48,10 @@ import {
   LockOpen,
   Plus,
   RefreshCw,
-  Shield,
+  ShieldCheck,
   Trash2,
   User,
+  UserRound,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import PageShell from "../../../layouts/PageShell";
@@ -152,6 +153,68 @@ function userInitials(displayName: string, username: string): string {
     return (parts[0][0] + parts[1][0]).toUpperCase();
   }
   return source.slice(0, 2).toUpperCase();
+}
+
+const FIELD_ICON_PROPS = {
+  size: 16 as const,
+  style: { color: "var(--fn-text-tertiary)" },
+};
+
+interface RolePickerProps {
+  value?: "admin" | "user";
+  onChange?: (value: "admin" | "user") => void;
+  options: {
+    value: "admin" | "user";
+    label: string;
+    hint: string;
+  }[];
+}
+
+function RolePicker({ value, onChange, options }: RolePickerProps) {
+  return (
+    <div className={styles.rolePicker} role="radiogroup">
+      {options.map((opt) => {
+        const selected = value === opt.value;
+        const Icon = opt.value === "admin" ? ShieldCheck : UserRound;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            className={`${styles.roleOption} ${
+              selected ? styles.roleOptionSelected : ""
+            } ${
+              opt.value === "admin"
+                ? styles.roleOptionAdmin
+                : styles.roleOptionUser
+            }`}
+            onClick={() => onChange?.(opt.value)}
+          >
+            <span className={styles.roleOptionIcon} aria-hidden>
+              <Icon size={15} strokeWidth={2} />
+            </span>
+            <span className={styles.roleOptionBody}>
+              <span className={styles.roleOptionLabel}>{opt.label}</span>
+              <span className={styles.roleOptionHint}>{opt.hint}</span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function RoleLegend() {
+  const { t } = useTranslation();
+  return (
+    <div className={styles.roleLegend} role="note">
+      <span className={styles.roleLegendLabel}>
+        {t("adminUsers.roleLegendTitle")}
+      </span>
+      <p className={styles.roleLegendText}>{t("adminUsers.roleLegend")}</p>
+    </div>
+  );
 }
 
 function UserCardGrid({
@@ -466,6 +529,22 @@ export default function AdminUsersPage() {
     { value: "user" as const, label: t("adminUsers.roleUser") },
   ];
 
+  const createRoleOptions = useMemo(
+    () => [
+      {
+        value: "user" as const,
+        label: t("adminUsers.roleUser"),
+        hint: t("adminUsers.roleUserHint"),
+      },
+      {
+        value: "admin" as const,
+        label: t("adminUsers.roleAdmin"),
+        hint: t("adminUsers.roleAdminHint"),
+      },
+    ],
+    [t],
+  );
+
   const isSelfAdmin = useCallback(
     (row: UserRow) => row.id === currentUserId && row.role === "admin",
     [currentUserId],
@@ -684,50 +763,53 @@ export default function AdminUsersPage() {
       title={t("pageShell.adminUsers.title")}
       subtitle={t("pageShell.adminUsers.subtitle")}
     >
-      <div className={expertStyles.gridToolbar} style={{ marginBottom: 16 }}>
-        <span className={expertStyles.gridCount}>
-          {t("adminUsers.totalUsers", { count: rows.length })}
-        </span>
-        <div className={expertStyles.gridToolbarRight}>
-          <Segmented
-            size="small"
-            value={viewMode}
-            onChange={(v) => setViewMode(v as "table" | "card")}
-            options={[
-              {
-                value: "card",
-                label: (
-                  <span className={expertStyles.viewModeLabel}>
-                    <LayoutGrid size={14} />
-                    {t("adminUsers.viewCard", "卡片")}
-                  </span>
-                ),
-              },
-              {
-                value: "table",
-                label: (
-                  <span className={expertStyles.viewModeLabel}>
-                    <List size={14} />
-                    {t("adminUsers.viewTable", "表格")}
-                  </span>
-                ),
-              },
-            ]}
-          />
-          <Button
-            icon={<RefreshCw size={14} />}
-            onClick={() => void refreshAll()}
-          >
-            {t("common.refresh")}
-          </Button>
-          <Button
-            type="primary"
-            icon={<Plus size={14} />}
-            onClick={() => setCreateOpen(true)}
-          >
-            {t("adminUsers.newUser")}
-          </Button>
+      <div className={styles.pageTop}>
+        <div className={expertStyles.gridToolbar}>
+          <span className={expertStyles.gridCount}>
+            {t("adminUsers.totalUsers", { count: rows.length })}
+          </span>
+          <div className={expertStyles.gridToolbarRight}>
+            <Segmented
+              size="small"
+              value={viewMode}
+              onChange={(v) => setViewMode(v as "table" | "card")}
+              options={[
+                {
+                  value: "card",
+                  label: (
+                    <span className={expertStyles.viewModeLabel}>
+                      <LayoutGrid size={14} />
+                      {t("adminUsers.viewCard", "卡片")}
+                    </span>
+                  ),
+                },
+                {
+                  value: "table",
+                  label: (
+                    <span className={expertStyles.viewModeLabel}>
+                      <List size={14} />
+                      {t("adminUsers.viewTable", "表格")}
+                    </span>
+                  ),
+                },
+              ]}
+            />
+            <Button
+              icon={<RefreshCw size={14} />}
+              onClick={() => void refreshAll()}
+            >
+              {t("common.refresh")}
+            </Button>
+            <Button
+              type="primary"
+              icon={<Plus size={14} />}
+              onClick={() => setCreateOpen(true)}
+            >
+              {t("adminUsers.newUser")}
+            </Button>
+          </div>
         </div>
+        <RoleLegend />
       </div>
 
       {showCardView ? (
@@ -931,44 +1013,53 @@ export default function AdminUsersPage() {
       <Modal
         title={t("adminUsers.modalNewTitle")}
         open={createOpen}
-        onCancel={() => setCreateOpen(false)}
+        onCancel={() => {
+          setCreateOpen(false);
+          form.resetFields();
+        }}
         onOk={() => form.submit()}
         okText={t("common.create")}
         cancelText={t("common.cancel")}
         confirmLoading={submitting}
+        destroyOnHidden
+        className={styles.createUserModal}
       >
         <Form<CreateValues>
           form={form}
           layout="vertical"
+          requiredMark={false}
           onFinish={onCreate}
           initialValues={{ role: "user" }}
+          className={styles.createUserForm}
         >
           <Form.Item
             label={t("adminUsers.formUsername")}
             name="username"
             rules={[
-              { required: true },
+              { required: true, message: t("adminUsers.formUsername") },
               {
                 pattern: /^[a-zA-Z0-9_-]{1,64}$/,
                 message: t("wizard.admin.usernameRule"),
               },
             ]}
           >
-            <Input prefix={<User size={16} />} autoFocus />
+            <Input prefix={<User {...FIELD_ICON_PROPS} />} autoFocus />
           </Form.Item>
           <Form.Item
             label={t("adminUsers.formDisplayName")}
             name="display_name"
           >
-            <Input prefix={<IdCard size={16} />} />
+            <Input prefix={<IdCard {...FIELD_ICON_PROPS} />} />
           </Form.Item>
           <Form.Item
             label={t("adminUsers.formPassword")}
             name="password"
-            rules={[{ required: true }]}
+            rules={[
+              { required: true, message: t("adminUsers.formPassword") },
+            ]}
           >
             <Input.Password
-              prefix={<Lock size={16} />}
+              prefix={<Lock {...FIELD_ICON_PROPS} />}
               autoComplete="new-password"
             />
           </Form.Item>
@@ -991,7 +1082,7 @@ export default function AdminUsersPage() {
             ]}
           >
             <Input.Password
-              prefix={<Lock size={16} />}
+              prefix={<LockOpen {...FIELD_ICON_PROPS} />}
               autoComplete="new-password"
             />
           </Form.Item>
@@ -999,15 +1090,9 @@ export default function AdminUsersPage() {
             label={t("adminUsers.formRole")}
             name="role"
             rules={[{ required: true }]}
+            className={styles.createUserRoleItem}
           >
-            <div className={styles.formSelectAffix}>
-              <Shield size={16} className={styles.formSelectAffixIcon} />
-              <Select
-                className={styles.formSelectAffixControl}
-                variant="borderless"
-                options={roleOptions}
-              />
-            </div>
+            <RolePicker options={createRoleOptions} />
           </Form.Item>
         </Form>
       </Modal>

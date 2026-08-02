@@ -29,6 +29,11 @@ import {
 import type { ChannelRow } from "../useChannels";
 import styles from "../index.module.less";
 import { channelApi } from "../../../../api/modules/channel";
+import {
+  clearFormDraft,
+  loadFormDraft,
+  saveFormDraft,
+} from "../../../../utils/formDraft";
 
 export interface ChannelFormValues {
   kind: ChannelKey;
@@ -191,6 +196,12 @@ export function ChannelDrawer({
   const supportsQuickConfig = QUICK_CONFIG_CHANNELS.includes(selectedKind);
   // weixin has no manual form — always quick-only
   const isQuickOnly = selectedKind === "weixin";
+  const draftScope = editing
+    ? `channel:${editing.id}`
+    : selectedKind
+      ? `channel:new:${selectedKind}`
+      : "";
+  const restoringDraftRef = useRef(false);
 
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current) {
@@ -222,6 +233,17 @@ export function ChannelDrawer({
       setSelectedKind(initialValues.kind);
     }
   }, [open, initialValues?.kind]);
+
+  // Restore session draft after server/default values are applied.
+  useEffect(() => {
+    if (!open || loadingConfig || !draftScope) return;
+    const draft = loadFormDraft<ChannelFormValues>(draftScope);
+    if (!draft) return;
+    restoringDraftRef.current = true;
+    form.setFieldsValue(draft);
+    if (draft.kind) setSelectedKind(draft.kind);
+    restoringDraftRef.current = false;
+  }, [open, loadingConfig, draftScope, form]);
 
   // ── WeCom Flow ─────────────────────────────────────────────────────────
   const startWecomQr = useCallback(async () => {
@@ -475,9 +497,11 @@ export function ChannelDrawer({
       config: Record<string, unknown>,
     ): Promise<boolean> => {
       const enabled = form.getFieldValue("enabled") ?? false;
-      return onSubmit(kind, name, config, enabled);
+      const ok = await onSubmit(kind, name, config, enabled);
+      if (ok) clearFormDraft(draftScope);
+      return ok;
     },
-    [form, onSubmit],
+    [form, onSubmit, draftScope],
   );
 
   // Auto-save when QR quick-config completes
@@ -632,7 +656,10 @@ export function ChannelDrawer({
         }
       }
     }
-    onSubmit(kind, kind, config, values.enabled ?? false);
+    void (async () => {
+      const ok = await onSubmit(kind, kind, config, values.enabled ?? false);
+      if (ok) clearFormDraft(draftScope);
+    })();
   };
 
   // ── QR Panels ───────────────────────────────────────────────────────────
@@ -1125,8 +1152,11 @@ export function ChannelDrawer({
           layout="vertical"
           initialValues={initialValues}
           onFinish={handleFinish}
-          onValuesChange={(changed) => {
+          onValuesChange={(changed, all) => {
             if (changed.kind) setSelectedKind(changed.kind as ChannelKey);
+            if (!restoringDraftRef.current && draftScope) {
+              saveFormDraft(draftScope, all as unknown as Record<string, unknown>);
+            }
           }}
         >
           {supportsQuickConfig && !isQuickOnly && !isEdit && (

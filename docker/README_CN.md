@@ -45,10 +45,10 @@ docker run -d \
 构建时可通过环境变量加速依赖下载：
 
 ```bash
-PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple \
-PIP_TRUSTED_HOST=mirrors.aliyun.com \
-NPM_REGISTRY=https://registry.npmmirror.com \
-APT_MIRROR=mirrors.aliyun.com \
+PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple \
+PIP_TRUSTED_HOST=mirrors.cloud.tencent.com \
+NPM_REGISTRY=https://mirrors.cloud.tencent.com/npm/ \
+APT_MIRROR=mirrors.cloud.tencent.com \
 bash docker/docker_build.sh
 ```
 

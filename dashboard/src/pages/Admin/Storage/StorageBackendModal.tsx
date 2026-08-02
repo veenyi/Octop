@@ -9,13 +9,18 @@
  * Structured fields: name, kind, access_key, secret_key, bucket, region, endpoint
  * Collapsible advanced section: raw JSON config
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Collapse, Drawer, Form, Input, Select } from "antd";
 import { message } from "@/utils/antdMessage";
 
 import { Activity } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { request } from "../../../api/request";
+import {
+  clearFormDraft,
+  loadFormDraft,
+  saveFormDraft,
+} from "../../../utils/formDraft";
 import {
   STORAGE_KINDS,
   STORAGE_TYPE_DEFS,
@@ -56,6 +61,10 @@ export function StorageBackendDrawer({
   const [probing, setProbing] = useState(false);
   const [form] = Form.useForm<StorageForm>();
   const isEdit = editing !== undefined;
+  const draftScope = editing
+    ? `storage:${editing.id}`
+    : `storage:new:${presetKind ?? "cos"}`;
+  const restoringDraftRef = useRef(false);
 
   // Determine the active kind for showing type-specific field hints
   const [activeKind, setActiveKind] = useState<string>(
@@ -84,8 +93,15 @@ export function StorageBackendDrawer({
         form.resetFields();
         form.setFieldValue("kind", kind);
       }
+      const draft = loadFormDraft<Partial<StorageForm>>(draftScope);
+      if (draft) {
+        restoringDraftRef.current = true;
+        form.setFieldsValue(draft);
+        if (typeof draft.kind === "string") setActiveKind(draft.kind);
+        restoringDraftRef.current = false;
+      }
     }
-  }, [open, editing, presetKind, form]);
+  }, [open, editing, presetKind, form, draftScope]);
 
   const handleSubmit = async () => {
     try {
@@ -120,6 +136,7 @@ export function StorageBackendDrawer({
         message.success(t("storage.createSuccess", { name: backendName }));
       }
 
+      clearFormDraft(draftScope);
       await onSaved(backendName);
       onClose();
     } catch (err) {
@@ -270,7 +287,15 @@ export function StorageBackendDrawer({
         </div>
       }
     >
-      <Form form={form} layout="vertical">
+      <Form
+        form={form}
+        layout="vertical"
+        onValuesChange={(_, all) => {
+          if (!restoringDraftRef.current) {
+            saveFormDraft(draftScope, all as unknown as Record<string, unknown>);
+          }
+        }}
+      >
         {/* Name — create only */}
         {!isEdit && (
           <Form.Item

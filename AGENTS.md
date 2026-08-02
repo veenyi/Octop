@@ -42,7 +42,7 @@ No external queue. No required services beyond an LLM provider.
 
 | Layer | Technology |
 |-------|-----------|
-| Language | Python 3.11+ |
+| Language | Python 3.12+ |
 | Web framework | FastAPI + uvicorn |
 | Async runtime | asyncio (no threads except `run_in_executor`) |
 | Database | SQLite via sync `sqlite3` (WAL) **or** PostgreSQL via `psycopg` / `psycopg_pool` |

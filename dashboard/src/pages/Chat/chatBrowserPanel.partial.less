@@ -17,37 +17,58 @@
   }
 }
 
-.browserStatusBtn {
-  position: fixed;
-  right: 24px;
-  bottom: 24px;
-  z-index: 100;
+.chatFloatActions {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border: 1px solid var(--fn-border-secondary);
-  border-radius: var(--fn-radius-full);
-  background: var(--fn-bg-primary);
+  gap: 12px;
+
+  @media (max-width: 767px) {
+    right: 10px;
+    top: auto;
+    bottom: 88px;
+    transform: none;
+  }
+}
+
+.chatFloatBtnWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+}
+
+.chatFloatBtn {
+  .chat-floating-circle-btn();
+}
+
+.chatFloatBadge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--fn-color-brand, #e85d75);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  pointer-events: none;
+  box-shadow: 0 0 0 2px var(--fn-bg-elevated, #fff);
+}
+
+.browserStatusBtn {
+  .chat-floating-circle-btn();
   color: var(--fn-text-quaternary);
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  transition: all 0.2s ease;
-  padding: 0;
-  font-size: 18px;
-
-  &:hover {
-    color: var(--fn-text-brand);
-    background: var(--fn-bg-hover);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-    transform: scale(1.05);
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--fn-color-brand);
-    outline-offset: 2px;
-  }
+  position: relative;
 }
 
 .filePanelBody {
@@ -58,22 +79,345 @@
   overflow: hidden;
 }
 
+.dockTitleWithIcon {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.dockTitleLeadingIcon {
+  flex-shrink: 0;
+  color: var(--fn-text-tertiary);
+}
+
+.dockTabBar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.dockTab {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 180px;
+  height: 30px;
+  padding: 0 4px 0 8px;
+  border-radius: 6px;
+  color: var(--fn-text-secondary);
+  flex-shrink: 0;
+}
+
+.dockTabActive {
+  color: var(--fn-text-primary);
+  background: var(--fn-bg-secondary, rgba(0, 0, 0, 0.04));
+}
+
+.dockTabLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 160px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+  overflow: hidden;
+
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.dockTabClose {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fn-text-tertiary);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+
+  &:hover {
+    color: var(--fn-text-primary);
+    background: var(--fn-bg-hover, rgba(0, 0, 0, 0.06));
+  }
+}
+
+.dockTabBodies {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dockTabBody {
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dockFileList {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--fn-bg-primary);
+  padding: 12px 20px 12px;
+  box-sizing: border-box;
+}
+
+.dockFileListEmpty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.dockFileTreeWrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--fn-border-secondary, rgba(0, 0, 0, 0.08));
+  border-radius: 8px;
+  background: var(--fn-bg-elevated, var(--fn-bg-primary));
+}
+
+.dockFileTreeSummary {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fn-text-secondary);
+  background: color-mix(
+    in srgb,
+    var(--fn-bg-secondary, #f5f5f7) 92%,
+    transparent
+  );
+  border-bottom: 1px solid var(--fn-border-secondary, rgba(0, 0, 0, 0.08));
+}
+
+.dockFileTree {
+  padding: 4px 0 8px;
+}
+
+.dockFileTreeFolder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 34px;
+  padding: 2px 12px 2px 10px;
+  border: none;
+  background: transparent;
+  color: var(--fn-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  box-sizing: border-box;
+
+  &:hover {
+    background: var(--fn-bg-secondary, #f5f5f7);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--fn-color-brand, #4f6ef7);
+    outline-offset: -2px;
+  }
+
+  svg {
+    flex-shrink: 0;
+    color: var(--fn-text-tertiary);
+  }
+}
+
+.dockFileTreeFolderName {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dockFileTreeFile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 2px 8px 2px 10px;
+  box-sizing: border-box;
+
+  &:hover,
+  &:focus-within {
+    background: var(--fn-bg-secondary, #f5f5f7);
+  }
+}
+
+.dockFileTreeFileMain {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--fn-text-primary);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+
+  &:focus-visible {
+    outline: 2px solid var(--fn-color-brand, #4f6ef7);
+    outline-offset: 1px;
+  }
+}
+
+.dockFileTreeIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  color: var(--fn-text-tertiary);
+}
+
+.dockFileTreeFileName {
+  font-size: 14px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dockFileTreeDownload {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--fn-border-secondary, rgba(0, 0, 0, 0.1));
+  border-radius: 6px;
+  background: var(--fn-bg-primary);
+  color: var(--fn-text-secondary);
+  cursor: pointer;
+  opacity: 1;
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+
+  &:hover:not(:disabled) {
+    color: var(--fn-color-brand, #4f6ef7);
+    border-color: color-mix(
+      in srgb,
+      var(--fn-color-brand, #4f6ef7) 35%,
+      transparent
+    );
+    background: color-mix(
+      in srgb,
+      var(--fn-color-brand, #4f6ef7) 8%,
+      var(--fn-bg-primary)
+    );
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--fn-color-brand, #4f6ef7);
+    outline-offset: 1px;
+    opacity: 1;
+  }
+}
+
+/* Desktop: hide download until row hover / keyboard focus. */
+@media (hover: hover) and (pointer: fine) {
+  .dockFileTreeDownload {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .dockFileTreeFile:hover .dockFileTreeDownload,
+  .dockFileTreeFile:focus-within .dockFileTreeDownload {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 .fileModalName {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 500;
   color: var(--fn-text-primary);
 }
 
+/* App ConfigProvider uses prefixCls="octop"; keep ant-* as fallback. */
 .fileModalSelect {
   max-width: min(100%, 360px);
+
+  &:global(.octop-select),
+  &:global(.ant-select),
+  &:global(.octop-select-outlined),
+  &:global(.ant-select-outlined),
+  &:global(.octop-select-borderless),
+  &:global(.ant-select-borderless) {
+    :global(.octop-select-selector),
+    :global(.ant-select-selector) {
+      border: none !important;
+      border-width: 0 !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      padding-inline: 0 22px !important;
+      outline: none !important;
+    }
+  }
+
+  &:global(.octop-select-focused),
+  &:global(.ant-select-focused),
+  &:hover {
+    :global(.octop-select-selector),
+    :global(.ant-select-selector) {
+      border: none !important;
+      box-shadow: none !important;
+    }
+  }
 }
 
 .fileModalIconBtn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 28px;
@@ -84,6 +428,8 @@
   color: var(--fn-text-secondary);
   cursor: pointer;
   padding: 0;
+  flex-shrink: 0;
+  line-height: 1;
 
   &:hover:not(:disabled) {
     color: var(--fn-text-primary);
@@ -98,6 +444,24 @@
   &:disabled {
     opacity: 0.45;
     cursor: not-allowed;
+  }
+}
+
+.fileModalIconBtnActive {
+  color: var(--fn-text-primary);
+  background: var(--fn-bg-secondary);
+}
+
+.fileModalIconBtnPrimary {
+  color: var(--fn-color-brand, #4f6ef7);
+
+  &:hover:not(:disabled) {
+    color: var(--fn-color-brand, #4f6ef7);
+    background: color-mix(
+      in srgb,
+      var(--fn-color-brand, #4f6ef7) 12%,
+      transparent
+    );
   }
 }
 
@@ -139,24 +503,6 @@
   font-size: 14px;
   font-weight: 500;
   color: var(--fn-text-secondary);
-}
-
-.agentProfileBtnWrap {
-  position: absolute;
-  right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 5;
-  display: inline-flex;
-  align-items: center;
-  line-height: 0;
-
-  @media (max-width: 767px) {
-    right: 10px;
-    top: auto;
-    bottom: 88px;
-    transform: none;
-  }
 }
 
 .agentProfileBtn {
@@ -368,10 +714,10 @@
 
 .browserStatusDot {
   position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 8px;
-  height: 8px;
+  top: 8px;
+  right: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   border: 1.5px solid var(--fn-bg-primary, #fff);
 }
@@ -405,47 +751,55 @@
   justify-content: center;
   touch-action: none;
   transition: background 0.15s;
-
-  &:hover,
-  &.resizerActive {
-    .resizerHandle {
-      opacity: 1;
-      background: #1890ff;
-    }
-  }
 }
 
 .panelResizer.horizontal {
   width: 6px;
   cursor: col-resize;
-  border-left: 1px solid var(--fn-border-secondary, #e0e0e0);
+  border-left: 1px solid var(--fn-chat-divider, var(--fn-border-primary));
 
   .resizerHandle {
-    width: 3px;
-    height: 40px;
-    border-radius: 2px;
-    background: var(--fn-text-quaternary, #ccc);
-    opacity: 0.5;
+    width: 1px;
+    height: 28px;
+    border-radius: 1px;
+    background: var(--fn-chat-divider, var(--fn-border-primary));
+    opacity: 0;
     transition:
       opacity 0.15s,
-      background 0.15s;
+      background 0.15s,
+      width 0.15s;
+  }
+
+  &:hover .resizerHandle,
+  &.resizerActive .resizerHandle {
+    width: 2px;
+    opacity: 1;
+    background: #1890ff;
   }
 }
 
 .panelResizer.vertical {
   height: 6px;
   cursor: row-resize;
-  border-top: 1px solid var(--fn-border-secondary, #e0e0e0);
+  border-top: 1px solid var(--fn-chat-divider, var(--fn-border-primary));
 
   .resizerHandle {
-    width: 40px;
-    height: 3px;
-    border-radius: 2px;
-    background: var(--fn-text-quaternary, #ccc);
-    opacity: 0.5;
+    width: 28px;
+    height: 1px;
+    border-radius: 1px;
+    background: var(--fn-chat-divider, var(--fn-border-primary));
+    opacity: 0;
     transition:
       opacity 0.15s,
-      background 0.15s;
+      background 0.15s,
+      height 0.15s;
+  }
+
+  &:hover .resizerHandle,
+  &.resizerActive .resizerHandle {
+    height: 2px;
+    opacity: 1;
+    background: #1890ff;
   }
 }
 

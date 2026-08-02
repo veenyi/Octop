@@ -40,7 +40,7 @@ bash scripts/install.sh --from-source
 bash scripts/install.sh --from-source /path/to/orca
 
 # 使用国内 PyPI 镜像加速依赖
-bash scripts/install.sh --mirror https://mirrors.aliyun.com/pypi/simple
+bash scripts/install.sh --mirror https://mirrors.cloud.tencent.com/pypi/simple
 ```
 
 Windows PowerShell 等价参数：`-Version`、`-FromSource`、`-SourceDir`、`-Extras`。

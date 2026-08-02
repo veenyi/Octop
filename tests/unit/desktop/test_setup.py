@@ -292,7 +292,7 @@ def test_resolve_linux_partial_install_needs_reinstall() -> None:
 
     with (
         patch("octop.infra.desktop.setup._check_vnc_localhost", return_value=(None, "")),
-        patch.dict("os.environ", {"DISPLAY": ""}, clear=False),
+        patch.dict("os.environ", {"DISPLAY": "", "WAYLAND_DISPLAY": ""}, clear=False),
         patch("octop.infra.desktop.setup._display_from_env_file", return_value=None),
         patch("octop.infra.desktop.setup._virtual_desktop_installed", return_value=False),
     ):

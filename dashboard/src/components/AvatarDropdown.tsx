@@ -1,31 +1,40 @@
 import { useState, useCallback } from "react";
 import {
   Avatar,
-  Drawer,
+  Modal,
   Form,
   Input,
   Button,
   Tag,
-  Space,
-  Typography,
   Divider,
   Segmented,
   Tooltip,
+  Popover,
 } from "antd";
 import { message } from "@/utils/antdMessage";
 
-import { LogOut, ChevronDown } from "lucide-react";
+import {
+  LogOut,
+  ChevronDown,
+  ChevronUp,
+  Settings,
+  Palette,
+  CircleHelp,
+  Github,
+  RefreshCw,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { authApi } from "../api/modules/auth";
 import { preferencesApi } from "../api/modules/preferences";
 import { clearAuthToken } from "../api/request";
-import { applyGuestLocale } from "../utils/locale";
+import { applyGuestLocale, applyUserLocale } from "../utils/locale";
 import { useUserRole } from "../hooks/useUserRole";
-import { applyUserLocale } from "../utils/locale";
+import ThemeSwitcher from "./ThemeSwitcher";
 import type { OctopUser } from "../api/modules/auth";
+import styles from "./AvatarDropdown.module.less";
 
-const { Text } = Typography;
+const GITHUB_URL = "https://github.com/TencentCloud/Octop";
 
 interface AvatarDropdownProps {
   user: OctopUser | null;
@@ -48,7 +57,8 @@ export default function AvatarDropdown({
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const role = useUserRole();
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [changingPw, setChangingPw] = useState(false);
   const [profileForm] = Form.useForm<{ display_name: string }>();
@@ -59,6 +69,7 @@ export default function AvatarDropdown({
   }>();
 
   const handleLogout = useCallback(async () => {
+    setMenuOpen(false);
     await authApi.logout();
     clearAuthToken();
     await applyGuestLocale();
@@ -101,6 +112,18 @@ export default function AvatarDropdown({
     }
   };
 
+  const handleLocaleChange = (val: string) => {
+    void preferencesApi
+      .setLocale(val)
+      .then(async (prefs) => {
+        await applyUserLocale(prefs.locale);
+        if (user) onUserChange?.({ ...user, locale: prefs.locale });
+      })
+      .catch((e) => {
+        message.error(e instanceof Error ? e.message : String(e));
+      });
+  };
+
   const currentLang = i18n.language?.startsWith("zh") ? "zh" : "en";
   const roleLabel =
     role === "admin" ? t("account.roleAdmin") : t("account.roleUser");
@@ -109,6 +132,13 @@ export default function AvatarDropdown({
   const initials = (user?.display_name || user?.username || "?")
     .charAt(0)
     .toUpperCase();
+
+  const openSettings = () => {
+    setMenuOpen(false);
+    profileForm.setFieldsValue({ display_name: user?.display_name || "" });
+    pwForm.resetFields();
+    setSettingsOpen(true);
+  };
 
   const avatar = (
     <Avatar
@@ -124,25 +154,91 @@ export default function AvatarDropdown({
     </Avatar>
   );
 
-  const trigger =
+  const menuContent = (
+    <div className={styles.menu}>
+      <div className={styles.menuHeader}>
+        <div className={styles.menuHeaderTop}>
+          <span className={styles.menuDisplayName}>{displayName}</span>
+          <Tag
+            color={role === "admin" ? "blue" : "default"}
+            className={styles.roleTag}
+          >
+            {roleLabel}
+          </Tag>
+        </div>
+        {user?.username && (
+          <span className={styles.menuHandle}>@{user.username}</span>
+        )}
+      </div>
+
+      <Divider className={styles.menuDivider} />
+
+      <div className={styles.menuItemRow}>
+        <div className={styles.menuItemLabel}>
+          <Palette size={16} strokeWidth={1.8} />
+          <span>{t("account.appearance")}</span>
+        </div>
+        <ThemeSwitcher compact />
+      </div>
+
+      <button
+        type="button"
+        className={styles.menuItem}
+        onClick={() => {
+          setMenuOpen(false);
+          message.info(t("account.helpBuilding"));
+        }}
+      >
+        <CircleHelp size={16} strokeWidth={1.8} />
+        <span>{t("account.helpFeedback")}</span>
+      </button>
+
+      <a
+        className={styles.menuItem}
+        href={GITHUB_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={() => setMenuOpen(false)}
+      >
+        <Github size={16} strokeWidth={1.8} />
+        <span>{t("account.projectUrl")}</span>
+      </a>
+
+      <button type="button" className={styles.menuItem} onClick={openSettings}>
+        <Settings size={16} strokeWidth={1.8} />
+        <span>{t("account.settings")}</span>
+      </button>
+
+      <button
+        type="button"
+        className={styles.menuItem}
+        onClick={() => {
+          setMenuOpen(false);
+          navigate("/admin/advanced?tab=updates");
+        }}
+      >
+        <RefreshCw size={16} strokeWidth={1.8} />
+        <span>{t("account.checkUpdates")}</span>
+      </button>
+
+      <Divider className={styles.menuDivider} />
+
+      <button
+        type="button"
+        className={`${styles.menuItem} ${styles.menuItemDanger}`}
+        onClick={() => void handleLogout()}
+      >
+        <LogOut size={16} strokeWidth={1.8} />
+        <span>{t("auth.logout")}</span>
+      </button>
+    </div>
+  );
+
+  const triggerButton =
     placement === "sidebar" && !compact ? (
       <button
         type="button"
-        onClick={() => setDrawerOpen(true)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          width: "100%",
-          border: "none",
-          background: "transparent",
-          padding: "8px 10px",
-          borderRadius: "var(--fn-radius-md)",
-          cursor: "pointer",
-          textAlign: "left",
-          color: "var(--fn-text-primary)",
-          transition: "background var(--fn-transition-fast)",
-        }}
+        className={styles.triggerExpanded}
         onMouseEnter={(e) => {
           e.currentTarget.style.background = "var(--fn-sidebar-item-hover)";
         }}
@@ -151,24 +247,20 @@ export default function AvatarDropdown({
         }}
       >
         {avatar}
-        <span
-          style={{
-            flex: 1,
-            minWidth: 0,
-            fontSize: 13,
-            fontWeight: 600,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {displayName}
-        </span>
-        <ChevronDown
-          size={14}
-          strokeWidth={1.8}
-          style={{ flexShrink: 0, color: "var(--fn-text-tertiary)" }}
-        />
+        <span className={styles.triggerName}>{displayName}</span>
+        {menuOpen ? (
+          <ChevronUp
+            size={14}
+            strokeWidth={1.8}
+            className={styles.triggerChevron}
+          />
+        ) : (
+          <ChevronDown
+            size={14}
+            strokeWidth={1.8}
+            className={styles.triggerChevron}
+          />
+        )}
       </button>
     ) : (
       <Tooltip
@@ -176,18 +268,7 @@ export default function AvatarDropdown({
         placement="right"
         mouseEnterDelay={0.3}
       >
-        <span
-          role="button"
-          tabIndex={0}
-          onClick={() => setDrawerOpen(true)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              setDrawerOpen(true);
-            }
-          }}
-          style={{ cursor: "pointer", display: "inline-flex" }}
-        >
+        <span role="button" tabIndex={0} className={styles.triggerCompact}>
           {avatar}
         </span>
       </Tooltip>
@@ -195,85 +276,109 @@ export default function AvatarDropdown({
 
   return (
     <>
-      {trigger}
-
-      <Drawer
-        title={t("account.myAccount")}
-        placement="left"
-        width={400}
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
+      <Popover
+        content={menuContent}
+        trigger="click"
+        open={menuOpen}
+        onOpenChange={setMenuOpen}
+        placement="topLeft"
+        arrow={false}
+        overlayClassName={styles.menuPopover}
         destroyOnHidden
-        footer={
-          <Button
-            danger
-            block
-            icon={<LogOut size={14} />}
-            onClick={() => void handleLogout()}
-          >
-            {t("auth.logout")}
-          </Button>
-        }
+        getPopupContainer={() => document.body}
       >
-        <Space direction="vertical" style={{ width: "100%" }} size="large">
-          {/* Identity summary */}
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 15 }}>{displayName}</div>
-            {user?.username && (
-              <Text type="secondary" style={{ fontSize: 13 }}>
-                @{user.username}
-              </Text>
-            )}
-          </div>
+        {triggerButton}
+      </Popover>
 
-          <div>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {t("account.username")}
-            </Text>
-            <Input
-              value={user?.username || ""}
-              disabled
-              style={{ marginTop: 4 }}
-            />
-          </div>
-
-          <div>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {t("account.role")}
-            </Text>
-            <div style={{ marginTop: 4 }}>
-              <Tag color={role === "admin" ? "blue" : "default"}>
-                {roleLabel}
-              </Tag>
+      <Modal
+        title={t("account.settings")}
+        open={settingsOpen}
+        onCancel={() => setSettingsOpen(false)}
+        footer={null}
+        destroyOnHidden
+        centered
+        width={420}
+        className={styles.settingsModal}
+      >
+        <div className={styles.settingsBody}>
+          <div className={styles.settingsIdentity}>
+            <Avatar
+              size={44}
+              style={{
+                background: "var(--fn-color-brand, #4f6ef7)",
+                fontSize: 18,
+                flexShrink: 0,
+              }}
+            >
+              {initials}
+            </Avatar>
+            <div className={styles.settingsIdentityText}>
+              <div className={styles.settingsIdentityName}>
+                <span>{displayName}</span>
+                <Tag
+                  color={role === "admin" ? "blue" : "default"}
+                  className={styles.roleTag}
+                >
+                  {roleLabel}
+                </Tag>
+              </div>
+              {user?.username && (
+                <span className={styles.settingsIdentityHandle}>
+                  @{user.username}
+                </span>
+              )}
             </div>
           </div>
 
-          <Form
-            form={profileForm}
-            onFinish={handleSaveProfile}
-            layout="vertical"
-            initialValues={{ display_name: user?.display_name || "" }}
-          >
-            <Form.Item name="display_name" label={t("account.displayName")}>
-              <Input placeholder={t("account.displayNamePlaceholder")} />
-            </Form.Item>
-            <Button type="primary" htmlType="submit" loading={saving}>
-              {t("common.save")}
-            </Button>
-          </Form>
-
-          <Divider style={{ margin: 0 }} />
-
-          <div>
-            <Text strong style={{ display: "block", marginBottom: 8 }}>
-              {t("language.title")}
-            </Text>
-            <Text
-              type="secondary"
-              style={{ fontSize: 12, display: "block", marginBottom: 10 }}
+          <section className={styles.settingsSection}>
+            <div className={styles.settingsSectionHead}>
+              <h3 className={styles.settingsSectionTitle}>
+                {t("account.displayName")}
+              </h3>
+              <p className={styles.settingsSectionDesc}>
+                {t("account.displayNameHint")}
+              </p>
+            </div>
+            <Form
+              form={profileForm}
+              onFinish={handleSaveProfile}
+              layout="vertical"
+              requiredMark={false}
+              initialValues={{ display_name: user?.display_name || "" }}
+              className={styles.settingsForm}
             >
-              {t("language.description")}
-            </Text>
+              <Form.Item
+                name="display_name"
+                style={{ marginBottom: 12 }}
+                rules={[
+                  {
+                    max: 64,
+                    message: t("account.displayNameTooLong"),
+                  },
+                ]}
+              >
+                <Input
+                  placeholder={t("account.displayNamePlaceholder")}
+                  maxLength={64}
+                />
+              </Form.Item>
+              <Button type="primary" htmlType="submit" loading={saving} block>
+                {t("account.saveDisplayName")}
+              </Button>
+            </Form>
+          </section>
+
+          <Divider className={styles.settingsDivider} />
+
+          <section className={styles.settingsSection}>
+            <div className={styles.settingsSectionHead}>
+              <h3 className={styles.settingsSectionTitle}>
+                {t("account.language")}
+              </h3>
+              <p className={styles.settingsSectionDesc}>
+                {t("account.languageHint")}
+              </p>
+            </div>
             <Segmented
               block
               value={currentLang}
@@ -281,65 +386,72 @@ export default function AvatarDropdown({
                 { label: t("account.langZh"), value: "zh" },
                 { label: t("account.langEn"), value: "en" },
               ]}
-              onChange={(val) => {
-                void preferencesApi
-                  .setLocale(val as string)
-                  .then(async (prefs) => {
-                    await applyUserLocale(prefs.locale);
-                    onUserChange?.({ ...user!, locale: prefs.locale });
-                  })
-                  .catch((e) => {
-                    message.error(e instanceof Error ? e.message : String(e));
-                  });
-              }}
+              onChange={(val) => handleLocaleChange(val as string)}
             />
-          </div>
+          </section>
 
-          <Divider style={{ margin: 0 }} />
+          <Divider className={styles.settingsDivider} />
 
-          <Form form={pwForm} onFinish={handleChangePw} layout="vertical">
-            <Text strong style={{ display: "block", marginBottom: 12 }}>
-              {t("account.changePassword")}
-            </Text>
-            <Form.Item
-              name="old_password"
-              label={t("account.currentPassword")}
-              rules={[
-                {
-                  required: true,
-                  message: t("account.currentPasswordRequired"),
-                },
-              ]}
+          <section className={styles.settingsSection}>
+            <div className={styles.settingsSectionHead}>
+              <h3 className={styles.settingsSectionTitle}>
+                {t("account.changePassword")}
+              </h3>
+              <p className={styles.settingsSectionDesc}>
+                {t("account.changePasswordHint")}
+              </p>
+            </div>
+            <Form
+              form={pwForm}
+              onFinish={handleChangePw}
+              layout="vertical"
+              requiredMark={false}
+              className={styles.settingsForm}
             >
-              <Input.Password autoComplete="current-password" />
-            </Form.Item>
-            <Form.Item
-              name="new_password"
-              label={t("account.newPassword")}
-              rules={[
-                { required: true, message: t("account.newPasswordRequired") },
-              ]}
-            >
-              <Input.Password autoComplete="new-password" />
-            </Form.Item>
-            <Form.Item
-              name="confirm"
-              label={t("account.confirmPassword")}
-              rules={[
-                {
-                  required: true,
-                  message: t("account.confirmPasswordRequired"),
-                },
-              ]}
-            >
-              <Input.Password autoComplete="new-password" />
-            </Form.Item>
-            <Button htmlType="submit" loading={changingPw}>
-              {t("account.changePassword")}
-            </Button>
-          </Form>
-        </Space>
-      </Drawer>
+              <Form.Item
+                name="old_password"
+                label={t("account.currentPassword")}
+                rules={[
+                  {
+                    required: true,
+                    message: t("account.currentPasswordRequired"),
+                  },
+                ]}
+              >
+                <Input.Password autoComplete="current-password" />
+              </Form.Item>
+              <Form.Item
+                name="new_password"
+                label={t("account.newPassword")}
+                rules={[
+                  {
+                    required: true,
+                    message: t("account.newPasswordRequired"),
+                  },
+                ]}
+              >
+                <Input.Password autoComplete="new-password" />
+              </Form.Item>
+              <Form.Item
+                name="confirm"
+                label={t("account.confirmPassword")}
+                rules={[
+                  {
+                    required: true,
+                    message: t("account.confirmPasswordRequired"),
+                  },
+                ]}
+                style={{ marginBottom: 12 }}
+              >
+                <Input.Password autoComplete="new-password" />
+              </Form.Item>
+              <Button htmlType="submit" loading={changingPw} block>
+                {t("account.changePassword")}
+              </Button>
+            </Form>
+          </section>
+        </div>
+      </Modal>
     </>
   );
 }

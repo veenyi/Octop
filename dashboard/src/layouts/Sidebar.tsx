@@ -628,14 +628,15 @@ export default function Sidebar({
     );
   }
 
-  // Desktop: custom sidebar with icon-only collapsed mode
+  // Desktop: custom sidebar with icon-only collapsed mode.
+  // Right border is drawn by MainLayout's RailEdgeControl.
   return (
     <div
       style={{
         width: isRailCollapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH,
         minWidth: isRailCollapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH,
         background: "var(--fn-sidebar-bg)",
-        borderRight: "1px solid var(--fn-sidebar-border)",
+        borderRight: "none",
         transition:
           "width 0.25s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
         overflow: "hidden",

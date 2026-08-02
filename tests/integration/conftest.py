@@ -211,7 +211,7 @@ async def env_skills_offline(
     client, srv, auth, agent_id = env_with_main_agent
 
     def _agent_not_running(_agent_id: str) -> None:
-        raise OctopError(ErrorCode.AGENT_NOT_FOUND, f"agent {_agent_id!r} not running")
+        raise OctopError(ErrorCode.AGENT_NOT_RUNNING, f"agent {_agent_id!r} not running")
 
     with patch.object(
         srv.app_runtime.agent_registry,

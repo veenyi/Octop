@@ -9,16 +9,33 @@
   padding: 0;
   height: 100%;
   align-self: stretch;
+  position: relative;
   background: var(--fn-bg-sidebar, var(--fn-bg-elevated, #fff));
 
   &.sidebarWrapperCollapsed {
+    /* No reserved strip — share the nav rail divider (avoids a double-line gap). */
     padding: 0;
+    width: 0;
+    min-width: 0;
+    overflow: visible;
   }
 
   .sidebar {
     height: 100%;
-    border-right: 1px solid var(--fn-border-primary, rgba(0, 0, 0, 0.12));
+    /* Vertical line drawn by RailEdgeControl */
+    border-right: none;
   }
+}
+
+.chatRailEdgeOpen {
+  right: -8px;
+}
+
+.chatRailEdgeClosed {
+  /* Align with MainLayout nav RailEdgeControl (edgeEnd: right -8px / width 16px). */
+  left: -8px !important;
+  right: auto !important;
+  width: 16px;
 }
 
 .sidebarWrapper {
@@ -48,7 +65,7 @@
   background: var(--fn-bg-elevated, #fff);
   box-shadow: none;
   border: none;
-  border-right: 1px solid var(--fn-border-primary, rgba(0, 0, 0, 0.12));
+  border-right: none;
 
   @media (max-width: 767px) {
     left: 16px;
@@ -313,7 +330,9 @@
 .chatMain {
   position: relative;
   z-index: 1;
-  padding: 14px;
+  /* No outer padding — chat title bar must share the same top edge / height
+     as the right-side dock chrome (browser / file preview). */
+  padding: 0;
   flex: 1;
   display: flex;
   flex-direction: column;

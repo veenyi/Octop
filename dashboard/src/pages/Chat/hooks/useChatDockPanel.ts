@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { PanelMode } from "../../../components/BrowserWorkspace";
+import {
+  canonicalizeDockFilePath,
+  dockFileTabId,
+} from "../utils/dockFilePath";
 import { usePanelResize, type PanelSizes } from "./usePanelResize";
 
 const PANEL_MODE_KEY = "octop:chat-dock:mode";
@@ -10,7 +14,12 @@ const LEGACY_BROWSER_MODE_KEY = "octop:browser-panel:mode";
 const LEGACY_FILE_SIZE_KEY = "octop:file-panel:size";
 const LEGACY_BROWSER_SIZE_KEY = "octop:browser-panel:size";
 
-export type DockKind = "file" | "browser";
+export type DockTab =
+  | { id: "files"; kind: "files" }
+  | { id: "browser"; kind: "browser" }
+  | { id: string; kind: "file"; path: string };
+
+export type DockTabId = DockTab["id"];
 
 function loadPanelMode(): PanelMode {
   try {
@@ -18,7 +27,6 @@ function loadPanelMode(): PanelMode {
     if (saved === "bottom" || saved === "right" || saved === "popup") {
       return saved;
     }
-    // Prefer the last file-panel mode, then browser, then right dock.
     for (const key of [LEGACY_FILE_MODE_KEY, LEGACY_BROWSER_MODE_KEY]) {
       const legacy = localStorage.getItem(key);
       if (legacy === "bottom" || legacy === "right" || legacy === "popup") {
@@ -57,68 +65,121 @@ function persistPanelSizes(sizes: PanelSizes) {
   }
 }
 
+function ensureFilesTab(tabs: DockTab[]): DockTab[] {
+  if (tabs.some((t) => t.id === "files")) return tabs;
+  return [{ id: "files", kind: "files" }, ...tabs];
+}
+
+function fallbackActiveId(
+  tabs: DockTab[],
+  closedId: DockTabId,
+  prevActive: DockTabId | null,
+): DockTabId | null {
+  if (tabs.length === 0) return null;
+  if (prevActive !== closedId && tabs.some((t) => t.id === prevActive)) {
+    return prevActive;
+  }
+  if (tabs.some((t) => t.id === "files")) return "files";
+  return tabs[tabs.length - 1]?.id ?? null;
+}
+
 /**
- * One shared chat dock for file preview / file viewer / browser.
- *
- * Opening any of 「预览」「查看文件」「查看浏览器」 reuses the same shell
- * (mode + size + popup position) and only switches the body content.
+ * Shared chat dock with tabbed file list / file viewers / browser.
  */
-export function useChatDockPanel(isMobile: boolean) {
+export function useChatDockPanel(
+  isMobile: boolean,
+  agentId?: string | null,
+) {
   const [dockOpen, setDockOpen] = useState(false);
-  const [dockKind, setDockKind] = useState<DockKind>("file");
   const [dockMode, setDockMode] = useState<PanelMode>(loadPanelMode);
-  const [filePath, setFilePath] = useState<string | null>(null);
-  const userDismissedRef = useRef(false);
+  const [openTabs, setOpenTabs] = useState<DockTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<DockTabId | null>(null);
   const { panelSizes, isResizing, handleResizeStart } = usePanelResize(
     loadPanelSizes(),
     persistPanelSizes,
   );
 
-  const handleClose = useCallback(() => {
-    userDismissedRef.current = true;
-    setDockOpen(false);
-    setFilePath(null);
-  }, []);
-
-  const openFileAt = useCallback(
-    (path?: string | null) => {
-      userDismissedRef.current = false;
-      setFilePath(path ?? null);
-      setDockKind("file");
-      setDockOpen(true);
-      if (isMobile) {
-        setDockMode("bottom");
-      }
-    },
-    [isMobile],
-  );
-
-  const openFilePanel = useCallback(() => {
-    openFileAt(null);
-  }, [openFileAt]);
-
-  const openBrowserPanel = useCallback(() => {
-    userDismissedRef.current = false;
-    setDockKind("browser");
+  const openDock = useCallback(() => {
     setDockOpen(true);
     if (isMobile) {
       setDockMode("bottom");
     }
   }, [isMobile]);
 
+  const handleClose = useCallback(() => {
+    setDockOpen(false);
+  }, []);
+
+  const openFileList = useCallback(() => {
+    setOpenTabs((prev) => ensureFilesTab(prev));
+    setActiveTabId("files");
+    openDock();
+  }, [openDock]);
+
+  const openFileAt = useCallback(
+    (path?: string | null) => {
+      const normalized = path
+        ? canonicalizeDockFilePath(path, agentId)
+        : "";
+      if (!normalized) {
+        openFileList();
+        return;
+      }
+      const id = dockFileTabId(normalized, agentId);
+      setOpenTabs((prev) => {
+        if (prev.some((t) => t.id === id)) return prev;
+        return [...prev, { id, kind: "file", path: normalized }];
+      });
+      setActiveTabId(id);
+      openDock();
+    },
+    [agentId, openDock, openFileList],
+  );
+
+  const openBrowserTab = useCallback(() => {
+    setOpenTabs((prev) => {
+      if (prev.some((t) => t.id === "browser")) return prev;
+      return [...prev, { id: "browser", kind: "browser" }];
+    });
+    setActiveTabId("browser");
+    openDock();
+  }, [openDock]);
+
   const toggleBrowserPanel = useCallback(() => {
-    setDockOpen((prev) => {
-      if (prev && dockKind === "browser") {
+    setDockOpen((prevOpen) => {
+      if (prevOpen && activeTabId === "browser") {
         return false;
       }
-      userDismissedRef.current = false;
-      setDockKind("browser");
+      setOpenTabs((prev) => {
+        if (prev.some((t) => t.id === "browser")) return prev;
+        return [...prev, { id: "browser", kind: "browser" }];
+      });
+      setActiveTabId("browser");
       return true;
     });
     if (isMobile) {
       setDockMode("bottom");
     }
-  }, [dockKind, isMobile]);
+  }, [activeTabId, isMobile]);
+
+  const closeTab = useCallback((id: DockTabId) => {
+    setOpenTabs((prev) => {
+      const next = prev.filter((t) => t.id !== id);
+      setActiveTabId((current) => {
+        const nextActive = fallbackActiveId(next, id, current);
+        if (next.length === 0) {
+          setDockOpen(false);
+        }
+        return nextActive;
+      });
+      return next;
+    });
+  }, []);
+
+  const setActiveTab = useCallback((id: DockTabId) => {
+    setActiveTabId(id);
+    setDockOpen(true);
+  }, []);
 
   const handleModeChange = useCallback(
     (mode: PanelMode) => {
@@ -131,15 +192,6 @@ export function useChatDockPanel(isMobile: boolean) {
     [isMobile],
   );
 
-  const resetDismissOnSessionGone = useCallback(
-    (browserSessionId: string | null) => {
-      if (!browserSessionId) {
-        userDismissedRef.current = false;
-      }
-    },
-    [],
-  );
-
   useEffect(() => {
     try {
       localStorage.setItem(PANEL_MODE_KEY, dockMode);
@@ -148,21 +200,27 @@ export function useChatDockPanel(isMobile: boolean) {
     }
   }, [dockMode]);
 
+  const activeTab =
+    openTabs.find((t) => t.id === activeTabId) ?? openTabs[0] ?? null;
+  const filePath = activeTab?.kind === "file" ? activeTab.path : null;
+
   return {
     dockOpen,
-    dockKind,
     dockMode,
     filePath,
+    openTabs,
+    activeTabId,
+    activeTab,
     panelSizes,
     isResizing,
     handleResizeStart,
     handleClose,
     handleModeChange,
     openFileAt,
-    openFilePanel,
-    openBrowserPanel,
+    openFileList,
+    openBrowserTab,
     toggleBrowserPanel,
-    resetDismissOnSessionGone,
-    userDismissedRef,
+    closeTab,
+    setActiveTab,
   };
 }

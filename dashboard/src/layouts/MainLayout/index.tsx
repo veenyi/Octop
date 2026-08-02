@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect, useState, useCallback } from "react";
 import { Routes, Route, useLocation } from "react-router-dom";
 import Sidebar from "../Sidebar";
 import Header from "../Header";
+import RailEdgeControl from "../../components/RailEdgeControl";
 import { ServiceRestartProvider } from "../../context/ServiceRestartContext";
 import PwaUpdatePrompt from "../../components/PwaUpdatePrompt";
 import { PwaAutoPrompt } from "../../components/PwaInstallPrompt";
@@ -17,6 +18,7 @@ import {
 import { CHAT_HISTORY_RAIL_ID, isChatPath } from "../chatHistoryRail";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { useChatSidebarOpen } from "../../pages/Chat/hooks/useChatSidebarState";
+import { EXPAND_CHAT_RAIL_EVENT } from "../../pages/Chat/components/ChatSidebarPanel";
 import RequireAdmin from "../../components/RequireAdmin";
 
 const Chat = lazy(() => import("../../pages/Chat"));
@@ -66,27 +68,41 @@ export default function MainLayout() {
     }
   }, [onWorkbench]);
 
+  const persistNavCollapsed = useCallback((next: boolean) => {
+    setCollapsed(next);
+    try {
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  /** Mobile header / overlay: simple nav toggle. */
   const toggleCollapsed = useCallback(() => {
-    if (!isMobile && isChatPath(currentPath)) {
-      if (!collapsed && chatSidebarOpen) {
-        setChatSidebarOpen(false);
-        return;
-      }
-      if (collapsed) {
+    persistNavCollapsed(!collapsed);
+  }, [collapsed, persistNavCollapsed]);
+
+  /**
+   * Desktop nav rail edge:
+   * - expand: open nav; if chat history is also closed, open both
+   * - collapse: collapse nav only
+   */
+  const handleNavRailToggle = useCallback(() => {
+    if (collapsed) {
+      persistNavCollapsed(false);
+      if (isChatPath(currentPath) && !chatSidebarOpen) {
         setChatSidebarOpen(true);
       }
+      return;
     }
-
-    setCollapsed((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next));
-      } catch {
-        /* ignore */
-      }
-      return next;
-    });
-  }, [chatSidebarOpen, collapsed, currentPath, isMobile, setChatSidebarOpen]);
+    persistNavCollapsed(true);
+  }, [
+    collapsed,
+    chatSidebarOpen,
+    currentPath,
+    persistNavCollapsed,
+    setChatSidebarOpen,
+  ]);
 
   // When switching to mobile, always collapse; restore saved preference on desktop
   useEffect(() => {
@@ -111,6 +127,18 @@ export default function MainLayout() {
     window.addEventListener("octop:toggle-nav", handler);
     return () => window.removeEventListener("octop:toggle-nav", handler);
   }, []);
+
+  // Chat history rail expand: if nav is also collapsed, open both rails.
+  useEffect(() => {
+    const handler = () => {
+      setChatSidebarOpen(true);
+      if (collapsed) {
+        persistNavCollapsed(false);
+      }
+    };
+    window.addEventListener(EXPAND_CHAT_RAIL_EVENT, handler);
+    return () => window.removeEventListener(EXPAND_CHAT_RAIL_EVENT, handler);
+  }, [collapsed, persistNavCollapsed, setChatSidebarOpen]);
 
   const routes = (
     <Suspense
@@ -166,12 +194,29 @@ export default function MainLayout() {
           />
         )}
 
-        <Sidebar
-          selectedKey={selectedKey}
-          collapsed={collapsed}
-          onToggle={toggleCollapsed}
-          isMobile={isMobile}
-        />
+        <div
+          style={{
+            position: "relative",
+            flexShrink: 0,
+            alignSelf: "stretch",
+            display: "flex",
+            minHeight: 0,
+          }}
+        >
+          <Sidebar
+            selectedKey={selectedKey}
+            collapsed={collapsed}
+            onToggle={toggleCollapsed}
+            isMobile={isMobile}
+          />
+          {!isMobile && (
+            <RailEdgeControl
+              expanded={!collapsed}
+              onToggle={handleNavRailToggle}
+              side="end"
+            />
+          )}
+        </div>
 
         {isChatRoute && (
           <div
@@ -182,11 +227,12 @@ export default function MainLayout() {
               alignSelf: "stretch",
               minHeight: 0,
               height: "100%",
+              position: "relative",
             }}
           />
         )}
 
-        {/* Right column: header on top, page content below */}
+        {/* Right column: mobile header (if any) + page content */}
         <div
           style={{
             flex: 1,
@@ -197,20 +243,20 @@ export default function MainLayout() {
             overflow: "hidden",
           }}
         >
-          {!(
-            isMobile &&
-            (SELF_HEADER_PATHS.has(currentPath) ||
+          {isMobile &&
+            !(
+              SELF_HEADER_PATHS.has(currentPath) ||
               [...SELF_HEADER_PATHS].some((p) =>
                 currentPath.startsWith(p + "/"),
-              ))
-          ) && (
-            <Header
-              selectedKey={selectedKey}
-              collapsed={collapsed}
-              onToggle={toggleCollapsed}
-              isMobile={isMobile}
-            />
-          )}
+              )
+            ) && (
+              <Header
+                selectedKey={selectedKey}
+                collapsed={collapsed}
+                onToggle={toggleCollapsed}
+                isMobile={isMobile}
+              />
+            )}
 
           <Layout
             style={{

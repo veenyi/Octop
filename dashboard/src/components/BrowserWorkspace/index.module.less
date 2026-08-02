@@ -240,12 +240,33 @@
 .footer {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 10px;
   padding: 8px 12px;
   border-top: 1px solid var(--fn-border-secondary, #e0e0e0);
   flex-shrink: 0;
   min-height: 42px;
+}
+
+.footerLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.footerLeft .controlLabel {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.footerRight {
+  flex-shrink: 0;
+}
+
+.footerResolution {
+  width: 104px;
 }
 
 .emptyFooterHint {
@@ -255,11 +276,18 @@
 }
 
 .stateTag {
+  margin-inline-end: 0 !important;
   font-size: 11px;
   padding: 1px 6px;
   border-radius: 3px;
   background: var(--fn-bg-secondary, #f0f0f0);
   color: var(--fn-text-secondary, #666);
+}
+
+.stateTagStreaming {
+  background: color-mix(in srgb, #52c41a 16%, var(--fn-bg-secondary, #f0f0f0));
+  color: #389e0d;
+  border-color: color-mix(in srgb, #52c41a 35%, transparent);
 }
 
 .stateTagTakeover {

@@ -217,7 +217,6 @@ const BrowserWorkspace: React.FC<BrowserWorkspaceProps> = ({
 
   const controlOwner: "agent" | "user" = session?.control_owner ?? "agent";
   const stateLabel = session?.state ?? "idle";
-  const profileName = session?.profile_name ?? "default";
   const isInteractive = controlOwner === "user";
   const isAuthNeeded =
     stateLabel === "awaiting_user_auth" || stateLabel === "authenticating";
@@ -285,79 +284,49 @@ const BrowserWorkspace: React.FC<BrowserWorkspaceProps> = ({
     onRefreshReady?.(handleRetry);
   }, [handleRetry, onRefreshReady]);
 
-  const sessionStateLabel = useMemo(() => {
-    if (controlOwner === "user") return t("browserWorkspace.userTakeoverShort");
-    const key = `browserWorkspace.state.${stateLabel}`;
-    const translated = t(key);
-    return translated !== key ? translated : stateLabel;
-  }, [controlOwner, stateLabel, t]);
+  const streamStatusLabel = useMemo(() => {
+    if (status === "streaming" || status === "browser_started") {
+      return t("browserViewer.streaming");
+    }
+    if (status === "connecting") {
+      return t("browserViewer.connecting");
+    }
+    if (status === "error") {
+      return t("browserWorkspace.streamError");
+    }
+    return t("browserWorkspace.state.idle");
+  }, [status, t]);
 
   const hasSession = !!(sessionId ?? sessionInfo?.session_id);
 
+  const showHeader = !hasSession || !hideHeaderRefresh;
+
   return (
     <div ref={panelRef} className={styles.browserWorkspace} style={style}>
-      {/* Header — profile / status / viewport controls */}
-      <div className={styles.header}>
-        <div className={styles.headerLeft}>
-          {hasSession ? (
-            <>
-              <span
-                className={styles.profileBadge}
-                style={{ background: isAuthNeeded ? "#faad14" : "#FF6B35" }}
-              >
-                <Monitor size={14} />
-                {profileName}
+      {showHeader && (
+        <div className={styles.header}>
+          <div className={styles.headerLeft}>
+            {!hasSession && (
+              <span className={styles.emptyHeaderTitle}>
+                <Globe size={14} style={{ marginRight: 6 }} />
+                {t("browserWorkspace.title")}
               </span>
-              <span className={`${styles.statusDot} ${styles[controlOwner]}`} />
-              <span
-                className={`${styles.controlLabel} ${
-                  controlOwner === "user" ? styles.takeoverActive : ""
-                }`}
-              >
-                {controlOwner === "agent"
-                  ? t("browserWorkspace.agentControl")
-                  : t("browserWorkspace.userTakeover")}
-              </span>
-              {isInteractive && (
-                <Tag color="blue" className={styles.interactiveTag}>
-                  {t("browserWorkspace.interactive")}
-                </Tag>
-              )}
-              {isAuthNeeded && (
-                <Tag color="warning" className={styles.authTag}>
-                  {t("browserWorkspace.needLogin")}
-                </Tag>
-              )}
-            </>
-          ) : (
-            <span className={styles.emptyHeaderTitle}>
-              <Globe size={14} style={{ marginRight: 6 }} />
-              {t("browserWorkspace.title")}
-            </span>
-          )}
-        </div>
-        <div className={styles.headerRight}>
-          <Tooltip title={t("browserWorkspace.resolution")}>
-            <Select
-              size="small"
-              value={vpMode}
-              onChange={setVpMode}
-              options={viewportSelectOptions}
-              style={{ width: 96 }}
-            />
-          </Tooltip>
+            )}
+          </div>
           {!hideHeaderRefresh && (
-            <Tooltip title={t("browserWorkspace.reconnect")}>
-              <Button
-                type="text"
-                size="small"
-                icon={<RefreshCw size={14} />}
-                onClick={handleRetry}
-              />
-            </Tooltip>
+            <div className={styles.headerRight}>
+              <Tooltip title={t("browserWorkspace.reconnect")}>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<RefreshCw size={14} />}
+                  onClick={handleRetry}
+                />
+              </Tooltip>
+            </div>
           )}
         </div>
-      </div>
+      )}
 
       {/* Auth alert banner */}
       {authAlert && isAuthNeeded && (
@@ -407,18 +376,45 @@ const BrowserWorkspace: React.FC<BrowserWorkspaceProps> = ({
         />
       </div>
 
-      {/* Footer with handoff actions */}
+      {/* Footer — control / stream / resolution, then handoff actions */}
       <div className={styles.footer}>
         {hasSession ? (
           <>
-            <Tag
-              className={`${styles.stateTag} ${
-                controlOwner === "user" ? styles.stateTagTakeover : ""
-              }`}
-            >
-              {sessionStateLabel}
-            </Tag>
-            <Space>
+            <div className={styles.footerLeft}>
+              <span className={`${styles.statusDot} ${styles[controlOwner]}`} />
+              <span
+                className={`${styles.controlLabel} ${
+                  controlOwner === "user" ? styles.takeoverActive : ""
+                }`}
+              >
+                {controlOwner === "agent"
+                  ? t("browserWorkspace.agentControl")
+                  : t("browserWorkspace.userTakeover")}
+              </span>
+              {isAuthNeeded && (
+                <Tag color="warning" className={styles.authTag}>
+                  {t("browserWorkspace.needLogin")}
+                </Tag>
+              )}
+              <Tag
+                className={`${styles.stateTag} ${
+                  isStreaming ? styles.stateTagStreaming : ""
+                } ${controlOwner === "user" ? styles.stateTagTakeover : ""}`}
+              >
+                {streamStatusLabel}
+              </Tag>
+              <Tooltip title={t("browserWorkspace.resolution")}>
+                <Select
+                  size="small"
+                  value={vpMode}
+                  onChange={setVpMode}
+                  options={viewportSelectOptions}
+                  className={styles.footerResolution}
+                  aria-label={t("browserWorkspace.resolution")}
+                />
+              </Tooltip>
+            </div>
+            <Space className={styles.footerRight} size={6}>
               {controlOwner === "user" ? (
                 <Button
                   size="small"
