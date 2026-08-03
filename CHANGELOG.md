@@ -6,6 +6,13 @@
 
 ## [Unreleased]
 
+### 新增
+- 高级设置「更新」页提供按安装方式升级说明与一键检查升级双栏布局
+- 高级设置 HTTPS 页优化签发状态与预检结果展示
+
+### 变更
+- `make all` 先执行前后端 `format-all`（Ruff + Prettier）；pre-commit 在 format 后回写已暂存文件并构建 dashboard
+
 ## [0.9.18] - 2026-08-02
 
 ### 新增
@@ -34,6 +41,12 @@
 - 技能相关域逻辑迁至 `infra/skills/`；数据库迁移合并为 schema v2（cron MCP + skill_packages 含图标）(#108)
 - 备份/恢复纳入 `skill-packages/` 目录，恢复前清空避免残留 (#108)
 - 统一聊天生成中 / 滚动辅助逻辑；antd message 经 App.useApp 绑定，支持主题感知 toast (#119)
+
+### 修复
+- Memory 原始事件列表的时间戳按服务器时区展示，与其余 Memory 页保持一致 (#110)
+
+### 修复
+- 记忆提取 / 提升等 harness 内部辅助 LLM 默认跟随全局偏好模型（此前切换全局模型后仍回退到首个可用模型）(#110)
 
 ## [0.9.16] - 2026-07-29
 

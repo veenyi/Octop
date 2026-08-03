@@ -424,7 +424,7 @@ tests/         unit/ + integration/
 ```bash
 # 后端
 make install          # pip install -e ".[dev]"
-make all              # lint + typecheck + test（发布门槛）
+make all              # format-all + lint + typecheck + test（发布门槛）
 
 # 前端（另开终端）
 make dev-frontend     # Vite 开发服务器 :5173
@@ -478,7 +478,7 @@ cd dashboard && npx tsc --noEmit
   <img src="docs/assets/qrcode.png" alt="客户企业微信服务群二维码" width="220" />
 </p>
 
-> 二维码有效期至 **2026-08-03**，过期后请联系管理员更新。
+> 二维码有效期至 **2026-08-08**，过期后请联系管理员更新。
 
 ### 📄 许可证
 
