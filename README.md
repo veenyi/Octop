@@ -415,7 +415,7 @@ tests/         unit/ + integration/
 ```bash
 # Backend
 make install          # pip install -e ".[dev]"
-make all              # lint + typecheck + test (ship bar)
+make all              # format-all + lint + typecheck + test (ship bar)
 
 # Frontend (separate terminal)
 make dev-frontend     # Vite dev server on :5173 (override with VITE_DEV_PORT)
@@ -468,7 +468,7 @@ For the customer WeCom support group, scan:
   <img src="docs/assets/qrcode.png" alt="WeCom customer group QR code" width="220" />
 </p>
 
-> This QR code is valid until **2026-08-03** (UTC+8). Please ask the maintainer for an updated code after it expires.
+> This QR code is valid until **2026-08-08** (UTC+8). Please ask the maintainer for an updated code after it expires.
 
 ## 📄 License
 
