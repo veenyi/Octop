@@ -731,6 +731,18 @@
   }
 }
 
+.marketCardFooterStart {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+
+  .expertInstalledLabel {
+    margin-left: 0;
+  }
+}
+
 .marketMeta {
   display: inline-flex;
   align-items: center;
@@ -1115,6 +1127,25 @@
   letter-spacing: 0.6px;
   color: var(--fn-text-tertiary);
   margin-bottom: 10px;
+}
+
+/* Match collapse header width with sibling sections (config / skills / …). */
+.drawerCollapse {
+  width: 100%;
+
+  :global(.ant-collapse-item) {
+    width: 100%;
+  }
+
+  :global(.ant-collapse-header) {
+    width: 100% !important;
+    align-items: center !important;
+  }
+
+  :global(.ant-collapse-header-text) {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
 }
 
 .drawerCancelBtn {

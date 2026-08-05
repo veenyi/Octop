@@ -31,7 +31,9 @@ import {
   defaultPreviewMode,
 } from "../../Agent/Workspace/components/FilePreview";
 import {
+  canonicalizeDockFilePath,
   dockFileBasename,
+  isHostAbsolutePath,
   normalizeDockFilePath,
   toWorkspaceApiPath,
 } from "../utils/dockFilePath";
@@ -317,6 +319,14 @@ export default function FilePanelContent({
     };
   }, [onActionsChange]);
 
+  // Keep host-absolute tool paths for API I/O (virtual root_dir failback).
+  // Only collapse relative / already-canonical keys for the viewer.
+  const viewerPath = useMemo(() => {
+    const n = normalizeDockFilePath(resolvedPath);
+    if (isHostAbsolutePath(n)) return n;
+    return canonicalizeDockFilePath(resolvedPath, agentId) || resolvedPath;
+  }, [resolvedPath, agentId]);
+
   return (
     <div className={styles.filePanelBody}>
       <div
@@ -337,10 +347,10 @@ export default function FilePanelContent({
             </p>
           </div>
         ) : (
-          resolvedPath && (
+          viewerPath && (
             <FileViewer
               agentId={agentId}
-              path={resolvedPath}
+              path={viewerPath}
               fromWorkspace={false}
               editMode={editMode}
               value={content}
