@@ -25,6 +25,85 @@ import {
 import { isChatStreamError } from "../../../utils/chatStreamError";
 import { buildUserMessageContent } from "../utils/chatAttachments";
 import { sealPriorStreamingAssistants as sealPriorStreamingAssistantsMessages } from "./sealPriorStreamingAssistants";
+import { turnStatusAction } from "./turnStatusGate";
+import {
+  MAX_STREAM_RESUME_ATTEMPTS,
+  STREAM_STALE_WITHOUT_SOCKET_MS,
+  shouldEmitStreamResumeNotice,
+  shouldForceSealStream,
+  shouldResumeStreamAfterClose,
+} from "./wsResumeGate";
+
+// ── Focused chat session (reconnect thrash only for the visible tab) ──────
+
+let focusedChatSessionId: string | null = null;
+
+/** Tell the store which chat thread the UI is currently showing. */
+export function setFocusedChatSession(sessionId: string | null): void {
+  const next = sessionId && sessionId !== "__empty__" ? sessionId : null;
+  const prev = focusedChatSessionId;
+  focusedChatSessionId = next;
+  if (next && next !== prev) {
+    void rebindFocusedSessionIfNeeded(next);
+  }
+}
+
+export function getFocusedChatSession(): string | null {
+  return focusedChatSessionId;
+}
+
+function isSessionFocused(sessionId: string): boolean {
+  // Unset focus (unit tests / before first paint) → treat as focused.
+  if (focusedChatSessionId == null) return true;
+  return focusedChatSessionId === sessionId;
+}
+
+async function rebindFocusedSessionIfNeeded(sessionId: string): Promise<void> {
+  const state = sessionStates.get(sessionId);
+  if (!state?.isStreaming) return;
+  if (isLiveSocketOpen(sessionId)) return;
+  const liveMeta = pendingResumeBySession.get(sessionId);
+  if (liveMeta) {
+    pendingResumeBySession.delete(sessionId);
+    void attachThread(
+      sessionId,
+      liveMeta.agentId,
+      liveMeta.threadId,
+      liveMeta.onStreamEnd,
+      liveMeta.resumeAttempt,
+      liveMeta.opts,
+    );
+    return;
+  }
+  // isStreaming sticky without pending meta — caller may still attach via loadHistory
+}
+
+/** Sessions that dropped while unfocused; re-attach when the tab is shown again. */
+const pendingResumeBySession = new Map<
+  string,
+  {
+    agentId: string;
+    threadId: string;
+    onStreamEnd?: () => void;
+    resumeAttempt: number;
+    opts?: { afterUnexpectedDrop?: boolean };
+  }
+>();
+
+/** Try to open the dashboard chat WebSocket; null if construction fails. */
+function tryOpenDashboardWs(agentId: string): WebSocket | null {
+  try {
+    return new WebSocket(buildDashboardChatWsUrl(agentId));
+  } catch {
+    return null;
+  }
+}
+
+function sealInFlightAssistantMessages(state: SessionStreamState): void {
+  state.messages = state.messages.map((m) =>
+    m.status === "streaming" ? { ...m, status: "done" as const } : m,
+  );
+}
 
 // ── Pending prefill text ──────────────────────────────────────────────────
 // Set by external pages (e.g. cron-jobs suggestions) before navigating to
@@ -120,7 +199,7 @@ export interface ToolEvent {
   toolName: string;
   toolId: string;
 }
-export type StreamEventKind = "streamStart" | "streamEnd";
+export type StreamEventKind = "streamStart" | "streamEnd" | "streamResume";
 export interface StreamEvent {
   kind: StreamEventKind;
   sessionId: string;
@@ -270,14 +349,112 @@ function notify(state: SessionStreamState) {
   }
 }
 
-function beginStream(state: SessionStreamState): void {
+function beginStream(state: SessionStreamState, sessionId: string): void {
   state.thinkingStartedAt = Date.now();
   state.isStreaming = true;
+  touchStreamActivity(sessionId);
 }
 
 function clearStreamingFlags(state: SessionStreamState): void {
   state.isStreaming = false;
   state.thinkingStartedAt = null;
+}
+
+// ── Live WebSocket bookkeeping (used by cancel / attach / send) ────────────
+
+type LiveSocket = {
+  ws: WebSocket;
+  agentId: string;
+  threadId: string;
+  /**
+   * Socket was closed on purpose (replace / done / user stop). Unexpected drop
+   * is false so auto-resume can re-subscribe.
+   */
+  intentionalClose: boolean;
+  /**
+   * User hit stop (or cancelStream). Distinct from intentional socket *replace*
+   * while the server turn should keep running.
+   */
+  userCancelled: boolean;
+};
+
+const liveSockets = new Map<string, LiveSocket>();
+
+/** Last stream-related activity (chunk / open / status) for sticky seals. */
+const streamActivityAt = new Map<string, number>();
+const streamWatchdogs = new Map<string, ReturnType<typeof setTimeout>>();
+
+function isLiveSocketOpen(sessionId: string): boolean {
+  const live = liveSockets.get(sessionId);
+  if (!live) return false;
+  return (
+    live.ws.readyState === WebSocket.OPEN ||
+    live.ws.readyState === WebSocket.CONNECTING
+  );
+}
+
+/** True when this session currently owns an open/connecting chat WebSocket. */
+export function hasLiveSocket(sessionId: string): boolean {
+  return isLiveSocketOpen(sessionId);
+}
+
+function clearStreamWatchdog(sessionId: string): void {
+  const timer = streamWatchdogs.get(sessionId);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    streamWatchdogs.delete(sessionId);
+  }
+}
+
+function touchStreamActivity(sessionId: string): void {
+  streamActivityAt.set(sessionId, Date.now());
+  armStreamWatchdog(sessionId);
+}
+
+function clearStreamActivity(sessionId: string): void {
+  clearStreamWatchdog(sessionId);
+  streamActivityAt.delete(sessionId);
+}
+
+/**
+ * If isStreaming sticks without a live socket past the grace window, seal so
+ * overscroll-refresh / free-scroll UX recover. Open sockets (long tools) skip.
+ */
+function armStreamWatchdog(sessionId: string): void {
+  clearStreamWatchdog(sessionId);
+  streamWatchdogs.set(
+    sessionId,
+    setTimeout(() => {
+      streamWatchdogs.delete(sessionId);
+      const state = sessionStates.get(sessionId);
+      if (!state) return;
+      if (
+        !shouldForceSealStream({
+          isStreaming: state.isStreaming,
+          hasLiveSocket: isLiveSocketOpen(sessionId),
+          lastActivityAt: streamActivityAt.get(sessionId) ?? null,
+          now: Date.now(),
+          staleWithoutSocketMs: STREAM_STALE_WITHOUT_SOCKET_MS,
+          sessionFocused: isSessionFocused(sessionId),
+        })
+      ) {
+        // Still streaming with a socket, within grace, or unfocused — re-check later.
+        if (state.isStreaming && isSessionFocused(sessionId)) {
+          armStreamWatchdog(sessionId);
+        }
+        return;
+      }
+      // Seal sticky stream without cancelling a server turn (no socket).
+      clearStreamingFlags(state);
+      state.streamMsg = "";
+      state.streamId = "";
+      state.streamBlockType = "";
+      sealInFlightAssistantMessages(state);
+      clearStreamActivity(sessionId);
+      notify(state);
+      emitStreamEvent({ kind: "streamEnd", sessionId });
+    }, STREAM_STALE_WITHOUT_SOCKET_MS),
+  );
 }
 
 // ── Public API ────────────────────────────────────────────────────────────
@@ -407,9 +584,12 @@ export function appendPushMessage(text: string) {
   }
 }
 
-/** Clear all messages for a session. */
+/** Clear all messages for a session, unless a turn is still in flight. */
 export function clearMessages(sessionId: string) {
   const state = getOrCreate(sessionId);
+  // Leaving a thread (agent switch, page change) must not seal a live turn:
+  // the socket keeps streaming into this state and the UI needs it on return.
+  if (state.isStreaming || isLiveSocketOpen(sessionId)) return;
   const alreadyEmpty =
     state.messages.length === 0 &&
     !state.isStreaming &&
@@ -431,16 +611,58 @@ export function clearMessages(sessionId: string) {
   notify(state);
 }
 
-/** Cancel any in-flight stream for a session. */
+function clearLiveSocket(sessionId: string, ws?: WebSocket): void {
+  const live = liveSockets.get(sessionId);
+  if (!live) return;
+  if (ws && live.ws !== ws) return;
+  liveSockets.delete(sessionId);
+}
+
+function sendCancelFrame(ws: WebSocket, threadId: string): void {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  try {
+    ws.send(JSON.stringify({ type: "cancel", thread_id: threadId }));
+  } catch {
+    // ignore
+  }
+}
+
+function closeLiveSocket(
+  sessionId: string,
+  opts: { intentional: boolean; userCancelled?: boolean },
+): void {
+  const live = liveSockets.get(sessionId);
+  if (!live) return;
+  live.intentionalClose = opts.intentional;
+  if (opts.userCancelled) {
+    live.userCancelled = true;
+  }
+  try {
+    live.ws.close();
+  } catch {
+    // ignore
+  }
+  clearLiveSocket(sessionId);
+}
+
+/** Cancel any in-flight stream for a session (user stop). */
 export function cancelStream(sessionId: string) {
   const state = sessionStates.get(sessionId);
   if (!state) return;
+  const live = liveSockets.get(sessionId);
+  if (live) {
+    live.intentionalClose = true;
+    live.userCancelled = true;
+    sendCancelFrame(live.ws, live.threadId || sessionId);
+  }
   const hadAbort = Boolean(state.abortController);
   const hadStreaming = state.isStreaming;
   const hadStreamingMsgs = state.messages.some((m) => m.status === "streaming");
   state.abortController?.abort();
   state.abortController = null;
   clearStreamingFlags(state);
+  clearStreamActivity(sessionId);
+  pendingResumeBySession.delete(sessionId);
   state.runUsage = null;
   if (hadStreamingMsgs) {
     state.messages = state.messages.map((m) =>
@@ -459,6 +681,10 @@ export function removeSession(sessionId: string) {
     state.abortController?.abort();
     sessionStates.delete(sessionId);
   }
+  pendingResumeBySession.delete(sessionId);
+  clearStreamActivity(sessionId);
+  clearStreamWatchdog(sessionId);
+  closeLiveSocket(sessionId, { intentional: true, userCancelled: true });
 }
 
 /** Rename a cached session's key (e.g. temp id → real UUID).
@@ -470,6 +696,31 @@ export function renameSessionKey(oldId: string, newId: string) {
     // Both keys point to the same state object, so subscribers on
     // either key see the same messages / streaming status.
     sessionStates.set(newId, state);
+    // Move live socket + resume bookkeeping to the canonical thread id so
+    // loadHistory / attachThread for *newId* still see the open stream.
+    const live = liveSockets.get(oldId);
+    if (live) {
+      liveSockets.delete(oldId);
+      liveSockets.set(newId, live);
+    }
+    const pending = pendingResumeBySession.get(oldId);
+    if (pending) {
+      pendingResumeBySession.delete(oldId);
+      pendingResumeBySession.set(newId, pending);
+    }
+    const activity = streamActivityAt.get(oldId);
+    if (activity != null) {
+      streamActivityAt.delete(oldId);
+      streamActivityAt.set(newId, activity);
+    }
+    const wd = streamWatchdogs.get(oldId);
+    if (wd != null) {
+      streamWatchdogs.delete(oldId);
+      streamWatchdogs.set(newId, wd);
+    }
+    if (focusedChatSessionId === oldId) {
+      focusedChatSessionId = newId;
+    }
     // Notify listeners so that components subscribed under the new key
     // (after a navigate) immediately see the existing messages.
     notify(state);
@@ -541,6 +792,9 @@ function handleHarnessChunk(
   chunk: HarnessChunk,
   sessionId?: string,
 ): void {
+  if (sessionId && state.isStreaming) {
+    touchStreamActivity(sessionId);
+  }
   switch (chunk.type) {
     case "token":
       appendStreamingToken(state, chunk.content);
@@ -1116,6 +1370,267 @@ function appendErrorBubble(state: SessionStreamState, message: string): void {
   ];
 }
 
+// ── Live WebSocket (send + weak stream resume) ─────────────────────────────
+
+/**
+ * After history load (or reconnect): subscribe to *threadId* and continue an
+ * in-flight turn when the server reports ``turn_status.active``.
+ *
+ * @param resumeAttempt Internal counter for auto-reconnect after drop (do not
+ *   pass from call sites except recursive re-attach).
+ */
+export async function attachThread(
+  sessionId: string,
+  agentId: string,
+  threadId: string,
+  onStreamEnd?: () => void,
+  resumeAttempt = 0,
+  opts?: { afterUnexpectedDrop?: boolean },
+): Promise<void> {
+  if (!agentId || !threadId || threadId === "__empty__") return;
+
+  const existing = liveSockets.get(sessionId);
+  if (
+    existing &&
+    existing.agentId === agentId &&
+    existing.threadId === threadId &&
+    existing.ws.readyState === WebSocket.OPEN
+  ) {
+    // Already bound — do not re-send subscribe (avoids turn_status churn).
+    return;
+  }
+
+  if (existing) {
+    // Rebind only — do not send cancel / do not seal streaming bubbles.
+    closeLiveSocket(sessionId, { intentional: true });
+  }
+
+  const state = getOrCreate(sessionId);
+  const ws = tryOpenDashboardWs(agentId);
+  if (!ws) {
+    if (state.isStreaming) {
+      clearStreamingFlags(state);
+      clearStreamActivity(sessionId);
+      notify(state);
+    }
+    return;
+  }
+
+  const live: LiveSocket = {
+    ws,
+    agentId,
+    threadId,
+    intentionalClose: false,
+    userCancelled: false,
+  };
+  liveSockets.set(sessionId, live);
+
+  // Do not clobber an in-flight sendTurn controller unless we need cancel
+  // affinity for this resume socket.
+  const controller = new AbortController();
+  const previousController = state.abortController;
+  state.abortController = controller;
+
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    clearStreamingFlags(state);
+    clearStreamActivity(sessionId);
+    pendingResumeBySession.delete(sessionId);
+    if (state.abortController === controller) {
+      state.abortController = null;
+    }
+    state.streamMsg = "";
+    state.streamId = "";
+    state.streamBlockType = "";
+    sealInFlightAssistantMessages(state);
+    notify(state);
+    emitStreamEvent({ kind: "streamEnd", sessionId });
+    onStreamEnd?.();
+  };
+
+  await new Promise<void>((resolve) => {
+    let opened = false;
+    const settleOpen = () => {
+      if (opened) return;
+      opened = true;
+      resolve();
+    };
+
+    const onAbort = () => {
+      live.intentionalClose = true;
+      live.userCancelled = true;
+      sendCancelFrame(ws, threadId);
+      try {
+        ws.close();
+      } catch {
+        // ignore
+      }
+      finish();
+    };
+    controller.signal.addEventListener("abort", onAbort, { once: true });
+
+    ws.onopen = () => {
+      touchStreamActivity(sessionId);
+      try {
+        ws.send(JSON.stringify({ type: "subscribe", thread_id: threadId }));
+      } catch {
+        // ignore
+      }
+      settleOpen();
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(String(event.data)) as Record<string, unknown>;
+        if (!data || typeof data !== "object") return;
+
+        if (data.type === "turn_status") {
+          if (turnStatusAction(Boolean(data.active)) === "expect_stream") {
+            if (!state.isStreaming) {
+              beginStream(state, sessionId);
+              notify(state);
+              emitStreamEvent({ kind: "streamStart", sessionId });
+            } else {
+              touchStreamActivity(sessionId);
+            }
+            if (
+              shouldEmitStreamResumeNotice({
+                resumeAttempt:
+                  opts?.afterUnexpectedDrop && resumeAttempt === 0
+                    ? 1
+                    : resumeAttempt,
+                turnActive: true,
+              })
+            ) {
+              emitStreamEvent({ kind: "streamResume", sessionId });
+            }
+          } else {
+            // Idle on server — clear any sticky local streaming from a race,
+            // then drop the probe socket so scroll/history UX is unaffected.
+            live.intentionalClose = true;
+            controller.signal.removeEventListener("abort", onAbort);
+            try {
+              ws.close();
+            } catch {
+              // ignore
+            }
+            clearLiveSocket(sessionId, ws);
+            if (state.isStreaming) {
+              finish();
+            } else if (state.abortController === controller) {
+              state.abortController = previousController;
+            }
+          }
+          return;
+        }
+
+        if (data.type === "pong") return;
+
+        handleHarnessChunk(state, data as unknown as HarnessChunk, sessionId);
+        if (
+          data.type === "done" ||
+          data.type === "error" ||
+          data.type === "hitl_required"
+        ) {
+          live.intentionalClose = true;
+          controller.signal.removeEventListener("abort", onAbort);
+          try {
+            ws.close();
+          } catch {
+            // ignore
+          }
+          clearLiveSocket(sessionId, ws);
+          finish();
+        }
+      } catch {
+        // ignore malformed frames
+      }
+    };
+
+    ws.onerror = () => {
+      settleOpen();
+    };
+
+    ws.onclose = () => {
+      controller.signal.removeEventListener("abort", onAbort);
+      const wasIntentional = live.intentionalClose;
+      const userCancelled = live.userCancelled;
+      const stillStreaming = state.isStreaming;
+      clearLiveSocket(sessionId, ws);
+      settleOpen();
+      // Socket replaced by a newer live for this session without user cancel —
+      // keep sticky isStreaming so thread switch / rebind does not seal bubbles.
+      if (wasIntentional && !userCancelled && stillStreaming) {
+        if (state.abortController === controller) {
+          state.abortController = previousController;
+        }
+        if (isLiveSocketOpen(sessionId)) {
+          return;
+        }
+        // No replacement yet (edge race) — leave streaming, allow focus rebind.
+        if (!pendingResumeBySession.has(sessionId)) {
+          pendingResumeBySession.set(sessionId, {
+            agentId,
+            threadId,
+            onStreamEnd,
+            resumeAttempt: resumeAttempt + 1,
+            opts: opts ?? { afterUnexpectedDrop: true },
+          });
+        }
+        return;
+      }
+      if (stillStreaming && !wasIntentional) {
+        // Keep grace window for sticky-seal watchdog while re-attaching.
+        touchStreamActivity(sessionId);
+      }
+      const focused = isSessionFocused(sessionId);
+      if (
+        shouldResumeStreamAfterClose({
+          intentionalClose: wasIntentional,
+          isStreaming: stillStreaming,
+          threadId,
+          attempt: resumeAttempt,
+          maxAttempts: MAX_STREAM_RESUME_ATTEMPTS,
+          sessionFocused: focused,
+        })
+      ) {
+        setTimeout(() => {
+          void attachThread(
+            sessionId,
+            agentId,
+            threadId,
+            onStreamEnd,
+            resumeAttempt + 1,
+            opts,
+          );
+        }, 400);
+      } else if (
+        stillStreaming &&
+        !wasIntentional &&
+        !focused &&
+        resumeAttempt < MAX_STREAM_RESUME_ATTEMPTS
+      ) {
+        // Background tab: remember rebind when the user returns.
+        pendingResumeBySession.set(sessionId, {
+          agentId,
+          threadId,
+          onStreamEnd,
+          resumeAttempt: resumeAttempt + 1,
+          opts,
+        });
+        clearStreamWatchdog(sessionId);
+      } else if (!wasIntentional && stillStreaming) {
+        // Exhausted retries or failed open — do not leave sticky isStreaming.
+        finish();
+      } else if (state.abortController === controller) {
+        state.abortController = previousController;
+      }
+    };
+  });
+}
+
 // ── Send a message via Dashboard WebSocket (/api/agents/{id}/chat/ws) ────────
 async function sendTurnWebSocket(
   sessionId: string,
@@ -1130,17 +1645,31 @@ async function sendTurnWebSocket(
   mcpServers?: string[] | null,
   skills?: string[] | null,
   targetAgentIds?: string[] | null,
+  onStreamEnd?: () => void,
 ): Promise<boolean> {
   const state = getOrCreate(sessionId);
+  const resolvedThreadId = (threadId || sessionId).trim();
+
+  if (liveSockets.has(sessionId)) {
+    // Replace prior socket for this session without cancelling the server turn.
+    closeLiveSocket(sessionId, { intentional: true });
+  }
 
   return new Promise((resolve) => {
-    let ws: WebSocket;
-    try {
-      ws = new WebSocket(buildDashboardChatWsUrl(agentId));
-    } catch {
+    const ws = tryOpenDashboardWs(agentId);
+    if (!ws) {
       resolve(false);
       return;
     }
+
+    const live: LiveSocket = {
+      ws,
+      agentId,
+      threadId: resolvedThreadId,
+      intentionalClose: false,
+      userCancelled: false,
+    };
+    liveSockets.set(sessionId, live);
 
     let settled = false;
     const settle = (ok: boolean) => {
@@ -1149,7 +1678,11 @@ async function sendTurnWebSocket(
       resolve(ok);
     };
 
+    let openedForTurn = false;
     const onAbort = () => {
+      live.intentionalClose = true;
+      live.userCancelled = true;
+      sendCancelFrame(ws, resolvedThreadId);
       try {
         ws.close();
       } catch {
@@ -1161,6 +1694,7 @@ async function sendTurnWebSocket(
     controller.signal.addEventListener("abort", onAbort, { once: true });
 
     ws.onopen = () => {
+      openedForTurn = true;
       const payload: Record<string, unknown> = {
         type: "user_turn",
         text: typeof messageContent === "string" ? messageContent : text,
@@ -1186,18 +1720,21 @@ async function sendTurnWebSocket(
       try {
         const data = JSON.parse(String(event.data)) as HarnessChunk;
         if (!data || typeof data !== "object") return;
+        if ((data as { type?: string }).type === "turn_status") return;
         handleHarnessChunk(state, data, sessionId);
         if (
           data.type === "done" ||
           data.type === "error" ||
           data.type === "hitl_required"
         ) {
+          live.intentionalClose = true;
           controller.signal.removeEventListener("abort", onAbort);
           try {
             ws.close();
           } catch {
             // ignore
           }
+          clearLiveSocket(sessionId, ws);
           finish();
           settle(true);
         }
@@ -1207,13 +1744,77 @@ async function sendTurnWebSocket(
     };
 
     ws.onerror = () => {
-      controller.signal.removeEventListener("abort", onAbort);
-      settle(false);
+      // Prefer onclose to decide resume vs fail — browsers almost always fire both.
     };
 
     ws.onclose = () => {
+      const wasIntentional = live.intentionalClose;
+      const userCancelled = live.userCancelled;
+      // Capture before any finish() clears streaming flags.
+      const focused = isSessionFocused(sessionId);
+      clearLiveSocket(sessionId, ws);
+      controller.signal.removeEventListener("abort", onAbort);
+
+      // Failed to open (unit tests / offline) — seal without resume thrash.
+      if (!openedForTurn && !userCancelled) {
+        if (!settled) {
+          finish();
+          settle(true);
+        }
+        return;
+      }
+
+      const shouldResume = shouldResumeStreamAfterClose({
+        intentionalClose: wasIntentional,
+        isStreaming: state.isStreaming,
+        threadId: resolvedThreadId,
+        sessionFocused: focused,
+      });
+
+      if (shouldResume) {
+        // Keep isStreaming + partial assistant bubble; re-subscribe for later chunks.
+        // Do NOT finish() — that seals incomplete content and blocks free-scroll UX.
+        touchStreamActivity(sessionId);
+        if (!settled) settle(true);
+        setTimeout(() => {
+          void attachThread(
+            sessionId,
+            agentId,
+            resolvedThreadId,
+            onStreamEnd,
+            0,
+            {
+              afterUnexpectedDrop: true,
+            },
+          );
+        }, 400);
+        return;
+      }
+
+      if (state.isStreaming && !wasIntentional && !focused) {
+        touchStreamActivity(sessionId);
+        pendingResumeBySession.set(sessionId, {
+          agentId,
+          threadId: resolvedThreadId,
+          onStreamEnd,
+          resumeAttempt: 1,
+          opts: { afterUnexpectedDrop: true },
+        });
+        clearStreamWatchdog(sessionId);
+        if (!settled) settle(true);
+        return;
+      }
+
+      // Intentional socket *replace* (new live already bound) without user stop:
+      // keep sticky isStreaming so rebind continues receiving chunks.
+      if (wasIntentional && !userCancelled && state.isStreaming && !settled) {
+        if (isLiveSocketOpen(sessionId)) {
+          settle(true);
+          return;
+        }
+      }
+
       if (!settled) {
-        controller.signal.removeEventListener("abort", onAbort);
         finish();
         settle(true);
       }
@@ -1239,6 +1840,7 @@ export async function sendTurn(
   if (!agentId) {
     appendErrorBubble(state, "No agent selected. Pick one from the top bar.");
     clearStreamingFlags(state);
+    clearStreamActivity(sessionId);
     notify(state);
     onStreamEnd?.();
     return;
@@ -1250,7 +1852,7 @@ export async function sendTurn(
   state.streamMsg = "";
   state.streamId = "";
   state.streamBlockType = "";
-  beginStream(state);
+  beginStream(state, sessionId);
   state.runUsage = null;
   notify(state);
 
@@ -1263,13 +1865,13 @@ export async function sendTurn(
 
   const finish = () => {
     clearStreamingFlags(state);
+    clearStreamActivity(sessionId);
+    pendingResumeBySession.delete(sessionId);
     state.abortController = null;
     state.streamMsg = "";
     state.streamId = "";
     state.streamBlockType = "";
-    state.messages = state.messages.map((m) =>
-      m.status === "streaming" ? { ...m, status: "done" as const } : m,
-    );
+    sealInFlightAssistantMessages(state);
     notify(state);
     emitStreamEvent({ kind: "streamEnd", sessionId });
     onStreamEnd?.();
@@ -1288,6 +1890,7 @@ export async function sendTurn(
     mcpServers,
     skills,
     targetAgentIds,
+    onStreamEnd,
   );
   if (!wsOk) {
     state.messages = [
@@ -1365,7 +1968,7 @@ export async function resumeHitl(
     ? "rejected"
     : "approved";
   resolveHitlPending(state, hitlStatus);
-  beginStream(state);
+  beginStream(state, sessionId);
   notify(state);
   emitStreamEvent({ kind: "streamStart", sessionId });
 
@@ -1383,13 +1986,13 @@ export async function resumeHitl(
 
   const finish = () => {
     clearStreamingFlags(state);
+    clearStreamActivity(sessionId);
+    pendingResumeBySession.delete(sessionId);
     state.abortController = null;
     state.streamMsg = "";
     state.streamId = "";
     state.streamBlockType = "";
-    state.messages = state.messages.map((m) =>
-      m.status === "streaming" ? { ...m, status: "done" as const } : m,
-    );
+    sealInFlightAssistantMessages(state);
     notify(state);
     emitStreamEvent({ kind: "streamEnd", sessionId });
   };

@@ -530,13 +530,24 @@
     "backendRootDir": "存储根目录",
     "backendRootDirPlaceholder": "从 / 起选择子目录",
     "backendRootDirDesc": "从文件系统根目录 / 浏览并选择 Agent 可访问的目录；选择非 / 路径时，保存前会检测 Octop 服务是否具备读、写、执行权限。",
+    "backendRootDirJailHint": "保存非根目录时，Octop 会尽力安装 bubblewrap（Linux）：有则 shell/Skill 在目录狱中执行；装不上或其它平台则对 execute 中的虚拟绝对路径改写到该根下，与虚拟文件系统对齐。",
     "rootDirListFailed": "无法列出子目录，请检查权限或选择其他路径。",
+    "rootDirMkdir": "新建文件夹",
+    "rootDirRename": "重命名文件夹",
+    "rootDirNewFolder": "新建文件夹",
+    "rootDirMkdirFailed": "无法创建文件夹，请检查权限或选择其他路径。",
+    "rootDirRenameFailed": "无法重命名文件夹，请检查名称与权限。",
     "rootDirProbe": {
       "not_directory": "所选路径不是有效目录。",
       "not_allowed": "不允许使用该路径作为存储根目录。",
       "permission_denied": "Octop 服务对该目录没有完整的读、写、执行权限。",
       "write_failed": "无法在该目录创建测试文件：{{detail}}",
       "guidance": "请改用有权限的目录，或调整目录所有权/权限（例如 chown、chmod）后重试。"
+    },
+    "ensureBwrap": {
+      "installed": "已安装 bubblewrap，局部根目录下的 shell/Skill 将使用目录狱。",
+      "skipped": "当前环境不使用 bubblewrap 目录狱；execute 将把虚拟绝对路径改写到所选根目录下。",
+      "degraded": "未能安装 bubblewrap（{{detail}}）。配置已保存；execute 将降级为路径改写（无真实 jail）。"
     },
     "backendPlaceholder": "选择存储后端类型",
     "backendModes": {
@@ -646,6 +657,7 @@
     "loadingEarlierMessages": "正在加载更早的消息…",
     "scrollForEarlierMessages": "向上滚动加载更早的消息",
     "refreshingMessages": "正在刷新消息…",
+    "streamResumed": "连接已恢复。若内容不完整，可下拉刷新。",
     "regenerate": "重新生成",
     "retry": "重试",
     "like": "有帮助",
@@ -744,6 +756,7 @@
     "modifiedFiles": "已修改文件（{{count}}）",
     "openBrowser": "查看浏览器",
     "openBrowserHint": "Agent 正在网页中操作",
+    "openTerminal": "打开终端",
     "editFileCard": "编辑文件",
     "fileWorkspace": "工作区文件",
     "fileWorkspaceHint": "Agent 已生成或编辑文件",
@@ -752,6 +765,7 @@
     "dockFileListEmpty": "暂无工具生成或发送的文件",
     "dockFileListCount": "{{count}} 个文件",
     "remoteBrowserTitle": "远程浏览器",
+    "dockTerminalTitle": "终端",
     "loadEarlierMessages": "加载更早的消息"
   },
   "tools": {
@@ -1078,6 +1092,8 @@
     "triggeredSuccess": "任务已触发，结果稍后显示",
     "executeFailed": "触发执行失败",
     "totalItems": "共 {{count}} 项",
+    "loadingJobs": "正在加载当前专家的任务…",
+    "syncing": "正在同步…",
     "noJobs": "开启你的第一个定时任务吧",
     "noJobsDesc": "选择下方示例，或点击「创建任务」从头开始",
     "viewTable": "表格",
@@ -3367,7 +3383,9 @@
     "username": "用户名",
     "password": "密码",
     "submit": "登录",
-    "failed": "登录失败"
+    "failed": "登录失败",
+    "slideHint": "拖动滑块到最右侧完成验证",
+    "slideVerified": "验证通过"
   },
   "adminUsers": {
     "newUser": "新建用户",
@@ -3399,9 +3417,9 @@
     "colLoginLock": "登录锁定",
     "loginLockActive": "锁定中 · 剩余 {{minutes}} 分钟",
     "loginLockNone": "—",
-    "colAgents": "智能体",
-    "agentsDrawerTitle": "{{username}} 的智能体",
-    "noAgents": "该用户暂无智能体",
+    "colAgents": "专家",
+    "agentsDrawerTitle": "{{username}} 的专家",
+    "noAgents": "该用户暂无专家",
     "colActions": "操作",
     "roleAdmin": "管理员",
     "roleUser": "普通用户",
