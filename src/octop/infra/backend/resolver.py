@@ -31,6 +31,51 @@ def default_agent_backend_spec(workspace_dir: Path) -> dict[str, Any]:
     return dict(DEFAULT_BACKEND_SPEC)
 
 
+def windows_neutralize_host_root(spec: Any, *, workspace_dir: Path) -> Any:
+    """Windows: rewrite local backends rooted at ``/`` to the agent workspace.
+
+    ``root_dir: "/"`` is the dashboard's default for local backends. On Windows
+    it resolves to the *current drive root* (often a different drive than the
+    agent workspace), so deepagents virtual-path checks reject every workspace
+    path with ``Path ... outside root directory``. Only ``root_dir`` is rewritten
+    so ``type`` / ``virtual_mode`` and other fields stay intact.
+
+    Applies to top-level ``local_shell`` / ``filesystem`` specs and to the
+    ``default`` of composite specs (the default is what anchors the agent
+    workspace). Route sub-backends are user-pinned and left untouched — a route
+    root of ``/`` is the caller's explicit choice and harmless to loading.
+    """
+    if os.name != "nt":
+        return spec
+    if not isinstance(spec, dict):
+        return spec
+    kind = spec.get("type")
+    if kind in ("local_shell", "filesystem") and _is_host_root(spec.get("root_dir")):
+        return {**spec, "root_dir": str(workspace_dir.resolve())}
+    if (
+        kind == "composite"
+        and isinstance(spec.get("default"), dict)
+        and _is_host_root(spec["default"].get("root_dir"))
+    ):
+        default = spec["default"]
+        return {
+            **spec,
+            "default": {**default, "root_dir": str(workspace_dir.resolve())},
+        }
+    return spec
+
+
+def _is_host_root(root: Any) -> bool:
+    """True when *root* is an explicitly host-rooted local backend path.
+
+    Only an *explicit* ``/``, ``\\`` or empty string counts (the dashboard's
+    default). A missing ``root_dir`` is left alone — harness already falls back
+    to ``workspace_dir`` for local backends, which is workspace-scoped by
+    design.
+    """
+    return root is not None and str(root).strip() in ("/", "\\", "")
+
+
 def resolve_agent_backend_spec(
     spec: Any,
     *,

@@ -185,8 +185,8 @@
 }
 
 .statusChecking {
-  color: var(--fn-color-brand, #635bff);
-  background: rgba(99, 91, 255, 0.08);
+  color: var(--fn-text-brand);
+  background: var(--fn-color-brand-bg);
 }
 
 .statusInactive {
@@ -398,6 +398,105 @@
 
 .configModeSwitch {
   margin-bottom: 12px;
+}
+
+.qqGroupPolicy {
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid var(--fn-card-border-normal);
+  border-radius: var(--fn-radius-lg);
+  background: var(--fn-bg-secondary, rgba(0, 0, 0, 0.02));
+
+  :global(.ant-form-item:last-child) {
+    margin-bottom: 0;
+  }
+}
+
+.qqGroupPolicyHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.qqGroupPolicyTitle {
+  color: var(--fn-text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.qqGroupPolicyDescription {
+  margin-top: 3px;
+  color: var(--fn-text-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.qqGroupPolicyTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.qqGroupPolicyTag {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  margin: 0;
+  padding: 5px 12px;
+  border: 1px solid var(--fn-card-border-normal);
+  border-radius: 9px;
+  background: var(--fn-bg-primary);
+  color: var(--fn-text-secondary);
+  font-size: 13px;
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color 0.16s ease,
+    background 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+
+  &:hover:not(.qqGroupPolicyTagDisabled) {
+    color: var(--fn-text-primary);
+    border-color: var(--fn-color-brand-light);
+    background: var(--fn-color-brand-bg);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--fn-color-brand-light);
+    outline-offset: 2px;
+  }
+}
+
+.qqGroupPolicyTagChecked {
+  color: var(--fn-color-brand);
+  border-color: var(--fn-color-brand-light);
+  background: var(--fn-color-brand-bg);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.qqGroupPolicyTagDisabled {
+  color: var(--fn-text-quaternary);
+  border-color: transparent;
+  background: var(--fn-bg-tertiary);
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.qqGroupPolicyGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 0.55fr);
+  gap: 12px;
+
+  @media (max-width: 560px) {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
 }
 
 .quickConfigPanel {

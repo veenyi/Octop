@@ -49,7 +49,12 @@ feature/* ──PR──► develop ──► release/x.y.z ──PR──► ma
 hotfix/* ──PR──► main (+ tag) and ──PR──► develop
 ```
 
-**Rules:** never push `develop` directly to `main` (PR only). Production `v*` tags are created **on `main` after** the release PR merges — not on the release branch before merge.
+**Rules:**
+
+- Never push `develop` directly to `main` — ship only via `release/x.y.z` → `main` (or hotfix → `main`). Do **not** open `develop` → `main` bulk merges; they fork history and break post-release sync.
+- Merge `release/x.y.z` → `main` with a **merge commit** (not squash). Squash drops shared ancestry with `develop`.
+- Production `v*` tags are created **on `main` after** the release PR merges — not on the release branch before merge.
+- After a release, `main` must stay an **ancestor** of `develop`. GitHub Actions runs `sync-main-to-develop.yml` (merge first; on conflict, a `chore/sync-develop-after-*` PR). Do not open legacy `head=main` → `develop` PRs.
 
 ## Pull requests
 
@@ -67,7 +72,7 @@ See [AGENTS.md](AGENTS.md) for module boundaries and coding conventions.
 1. Cut `release/x.y.z` from latest `develop` (version bump + CHANGELOG on that branch)
 2. Open PR: `release/x.y.z` → `main` and merge when green
 3. Tag `v<version>` on **main tip** and push — GitHub Actions builds, publishes to PyPI, and creates the GitHub Release
-4. Delete `release/x.y.z`; if needed, open PR `main` → `develop` to sync
+4. Delete `release/x.y.z`; Actions syncs `main` → `develop` (or opens `chore/sync-develop-after-*` if merge conflicts / branch protection)
 
 Agent-assisted publish: `.cursor/skills/publish` (`/publish <version>`).
 
@@ -109,7 +114,12 @@ make check-all        # 全栈质量门禁
 | `release/x.y.z` | 临时发版分支；发版完成后删除 |
 | `hotfix/*` | 从 `main` 紧急修复；合入 `main` 后再合回 `develop` |
 
-**规则：** 禁止将 `develop` 直接推送到 `main`（必须走 PR）。生产 `v*` tag 仅在 release PR **合入 `main` 之后**打在 main tip 上。
+**规则：**
+
+- 禁止 `develop` 直推/直 merge 到 `main` — 发版必须走 `release/x.y.z` → `main`（或 hotfix → `main`）。不要开 `develop` → `main` 大包 PR，否则历史分叉、发版后 sync 必冲突。
+- `release/x.y.z` → `main` 请用 **merge commit** 合并，不要 squash。
+- 生产 `v*` tag 仅在 release PR **合入 `main` 之后**打在 main tip 上。
+- 发版后 `main` 必须是 `develop` 的祖先；由 Actions `sync-main-to-develop.yml` 自动 sync（冲突或分支保护时会开 `chore/sync-develop-after-*` PR）。不要再用 `head=main` → `develop` 的老 sync PR。
 
 ## 提交流程
 
@@ -127,6 +137,6 @@ make check-all        # 全栈质量门禁
 1. 从最新 `develop` 切 `release/x.y.z`（在该分支 bump 版本与 CHANGELOG）
 2. PR：`release/x.y.z` → `main`，合并通过后
 3. 在 **main tip** 打并推送 `v<version>`，由 Actions 构建并发布
-4. 删除 `release/x.y.z`；必要时再开 `main` → `develop` 同步 PR
+4. 删除 `release/x.y.z`；Actions 自动 sync `main` → `develop`（冲突或分支保护时会开 `chore/sync-develop-after-*` PR）
 
 Hotfix：从 `main` 拉分支 → 合入 `main`（需发补丁则打 tag）→ 再合入 `develop`。
