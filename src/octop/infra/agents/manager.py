@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import shutil
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
@@ -23,6 +24,7 @@ from octop.infra.backend.resolver import (
     backend_spec_supports_execution,
     default_agent_backend_spec,
     resolve_agent_backend_spec,
+    windows_neutralize_host_root,
 )
 from octop.infra.connectors.builder import (
     build_mcp_server_configs_for_user,
@@ -440,6 +442,12 @@ class AgentManager:
         """Remove agent from DB, harness runtime, and workspace directory."""
         async with self._lock:
             await self._harness_manager.aremove_agent(agent_id)  # type: ignore[union-attr]
+        workspace_dir = self._paths.agent_workspace(agent_id)
+        try:
+            if await asyncio.to_thread(workspace_dir.exists):
+                await asyncio.to_thread(shutil.rmtree, workspace_dir)
+        except OSError:
+            logger.exception("rmtree failed for %s; agent removed from DB anyway", workspace_dir)
         self._repos.agent_repo.delete(agent_id)
         self._repos.audit_repo.write(actor=ACTOR_SYSTEM, action="agent.delete", target=agent_id)
 
@@ -1515,13 +1523,16 @@ class AgentManager:
     def _backend_spec_for_row(self, row: AgentRow) -> Any:
         cfg = self._agent_config_dict(row)
         backend_spec = cfg.get("backend")
+        workspace_dir = self._paths.ensure_agent_workspace(row.agent_id)
         if backend_spec is None:
-            workspace_dir = self._paths.ensure_agent_workspace(row.agent_id)
             return default_agent_backend_spec(workspace_dir)
-        return resolve_agent_backend_spec(
+        resolved = resolve_agent_backend_spec(
             backend_spec,
             repo=self._repos.storage_backend_repo,
         )
+        # Windows: the dashboard defaults local backends to root_dir "/", which
+        # resolves to a drive other than the workspace and breaks path checks.
+        return windows_neutralize_host_root(resolved, workspace_dir=workspace_dir)
 
     def _backend_workspace_for_row(self, row: AgentRow) -> Any:
         """Resolve :class:`BackendWorkspace` for *row* without a running harness agent."""

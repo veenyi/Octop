@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -415,6 +416,51 @@ async def test_reload_agent_clears_bootstrap_refresh_pending(manager: AgentManag
     harness_manager.aremove_agent.assert_awaited_once_with(agent_id)
 
 
+@pytest.mark.asyncio
+async def test_delete_removes_workspace_directory(manager: AgentManager) -> None:
+    """Deleting an agent must clean up its workspace directory on disk."""
+    agent_id = "AGT_DELETE_WS"
+    manager._repos.agent_repo.create(agent_id=agent_id, user_id=None, name="delete-ws")
+
+    workspace_dir = manager._paths.ensure_agent_workspace(agent_id)
+    assert workspace_dir.is_dir()
+    (workspace_dir / "MEMORY.md").write_text("old memory", encoding="utf-8")
+
+    harness_manager = MagicMock()
+    harness_manager.aremove_agent = AsyncMock()
+    manager._harness_manager = harness_manager
+
+    await manager.delete(agent_id)
+
+    harness_manager.aremove_agent.assert_awaited_once_with(agent_id)
+    assert manager.get_row(agent_id) is None
+    assert not workspace_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_still_removes_db_row_when_workspace_rmtree_fails(
+    manager: AgentManager, monkeypatch: Any
+) -> None:
+    """A failed workspace rmtree must not abort agent deletion (mirrors user removal)."""
+    import shutil
+
+    agent_id = "AGT_DELETE_ERR"
+    manager._repos.agent_repo.create(agent_id=agent_id, user_id=None, name="delete-err")
+
+    def _fail_rmtree(path: object) -> None:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(shutil, "rmtree", _fail_rmtree)
+
+    harness_manager = MagicMock()
+    harness_manager.aremove_agent = AsyncMock()
+    manager._harness_manager = harness_manager
+
+    await manager.delete(agent_id)
+
+    assert manager.get_row(agent_id) is None
+
+
 def test_bootstrap_pending_detects_unfinished_onboarding(tmp_path: Path) -> None:
     from harness_agent.backends import resolve_backend
     from harness_agent.backends.workspace import BackendWorkspace
@@ -436,6 +482,26 @@ def test_build_harness_config_respects_config_json_backend(manager: AgentManager
         _row(config_json=json.dumps({"backend": custom})),
     )
     assert cfg.backend == custom
+
+
+def test_backend_spec_for_row_neutralizes_host_root_on_windows(
+    manager: AgentManager, monkeypatch: Any
+) -> None:
+    # The dashboard persists local backends with root_dir "/" (host-root sentinel).
+    # On Windows that resolves to the current-drive root, breaking cross-drive reads
+    # of the workspace; the resolver must rewrite root_dir to the workspace path.
+    monkeypatch.setattr(os, "name", "nt")
+    row = _row(
+        config_json=json.dumps(
+            {"backend": {"type": "local_shell", "root_dir": "/", "virtual_mode": True}}
+        )
+    )
+    ws = manager._paths.ensure_agent_workspace(row.agent_id)
+    assert manager._backend_spec_for_row(row) == {
+        "type": "local_shell",
+        "root_dir": str(ws.resolve()),
+        "virtual_mode": True,
+    }
 
 
 def test_build_harness_config_omits_fs_permissions_for_local_shell(manager: AgentManager) -> None:

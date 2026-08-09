@@ -370,8 +370,10 @@ hotfix/* ──PR──► main (+ tag) and ──PR──► develop
 
 **Rules**
 
-- Never push `develop` directly onto `main` — all merges via PR.
-- Release sequence: cut `release/*` from latest `develop` → PR into `main` → **tag `v*` on main tip only after merge** → delete `release/*` → sync `main` → `develop` when needed.
+- Never push `develop` directly onto `main` — ship via `release/*` → `main` (or hotfix → `main`) only. Do **not** bulk-merge `develop` → `main`; it forks history and breaks post-release sync.
+- Merge `release/*` → `main` with a **merge commit** (not squash) so `main` stays reconcilable with `develop`.
+- Release sequence: cut `release/*` from latest `develop` → PR into `main` → **tag `v*` on main tip only after merge** → delete `release/*` → Actions syncs `main` → `develop` (`sync-main-to-develop.yml`; opens `chore/sync-develop-after-*` on conflict / branch protection).
+- Keep **`main` an ancestor of `develop`** after every release. Do not use legacy `head=main` → `develop` sync PRs.
 - Do **not** push a production tag from a release/feature branch before it is on `main`.
 - Hotfix: branch from `main`, PR to `main` (and tag if shipping), then PR into `develop`.
 - Day-to-day feature work: branch from `develop`, open PR **into `develop`** (not `main`).

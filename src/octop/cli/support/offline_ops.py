@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,8 @@ from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.gateway.threads import ThreadRegistry
 from octop.infra.users.password import hash_password
 from octop.infra.utils.ulid import new_cron_id, new_ulid
+
+logger = logging.getLogger(__name__)
 
 
 def _user_row_to_dict(row: Any) -> dict[str, Any]:
@@ -214,6 +218,12 @@ def delete_agent_offline(agent_id: str, *, home: Path | None = None) -> None:
     with open_cli_services(home) as svc:
         if svc.agent_repo.get(agent_id) is None:
             raise OctopError(ErrorCode.AGENT_NOT_FOUND, f"agent {agent_id!r} not found")
+        workspace_dir = svc.paths.agent_workspace(agent_id)
+        try:
+            if workspace_dir.exists():
+                shutil.rmtree(workspace_dir)
+        except OSError:
+            logger.exception("rmtree failed for %s; agent removed from DB anyway", workspace_dir)
         svc.agent_repo.delete(agent_id)
 
 

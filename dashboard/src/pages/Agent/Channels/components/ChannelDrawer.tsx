@@ -4,6 +4,7 @@ import {
   Drawer,
   Form,
   Input,
+  InputNumber,
   Popconfirm,
   Segmented,
   Select,
@@ -14,6 +15,7 @@ import { Activity } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { FormInstance } from "antd";
+import type { Rule } from "antd/es/form";
 import { QRCodeSVG } from "qrcode.react";
 import {
   CHANNEL_FIELDS,
@@ -23,8 +25,14 @@ import {
   CHANNEL_LABEL_KEYS,
   CHANNEL_URLS,
   DEFAULT_CHANNEL_DISPLAY_CONFIG,
+  DEFAULT_QQ_GROUP_CONTEXT_CONFIG,
+  normalizeChannelFieldValue,
+  normalizeQqGroupContextConfig,
   type ChannelField,
   type ChannelKey,
+  type QqGroupActivation,
+  type QqGroupContextConfig,
+  type QqGroupVisibility,
 } from "./constants";
 import type { ChannelRow } from "../useChannels";
 import styles from "../index.module.less";
@@ -68,12 +76,14 @@ export interface ChannelFormValues {
   enabled?: boolean;
   show_thinking?: boolean;
   show_tool_hints?: boolean;
-  [k: string]: string | boolean | undefined;
+  group_context?: QqGroupContextConfig;
+  [k: string]: string | boolean | QqGroupContextConfig | undefined;
   __raw_config?: string;
 }
 
 // Channels that support QR quick-config
 const QUICK_CONFIG_CHANNELS: ChannelKey[] = [
+  "qq",
   "wecom",
   "weixin",
   "feishu",
@@ -88,6 +98,12 @@ const YUANBAO_DEFAULT_WS_URL =
 type QrPhase =
   | { phase: "idle" }
   | { phase: "loading" }
+  | { phase: "qq_ready"; qrcodeUrl: string; qrcodeToken: string }
+  | {
+      phase: "qq_success";
+      appId: string;
+      secret: string;
+    }
   | { phase: "wecom_ready"; authUrl: string; scode: string }
   | { phase: "wecom_success"; botId: string; secret: string }
   | { phase: "weixin_ready"; qrcodeUrl: string; qrcodeToken: string }
@@ -138,24 +154,237 @@ function FormItemForField({ field }: { field: ChannelField }) {
   const Input1 =
     field.type === "password"
       ? Input.Password
-      : field.type === "textarea"
+      : field.type === "textarea" || field.type === "json"
       ? Input.TextArea
       : Input;
+  const rules: Rule[] = field.required
+    ? [{ required: true, message: `${field.label} 必填` }]
+    : [];
+  if (field.type === "json") {
+    rules.push({
+      validator: async (_: unknown, value: unknown) => {
+        if (!value) return;
+        try {
+          normalizeChannelFieldValue(field.name, value);
+        } catch {
+          throw new Error(`${field.label} 必须是 JSON 对象`);
+        }
+      },
+    });
+  }
   return (
-    <Form.Item
-      name={field.name}
-      label={field.label}
-      rules={
-        field.required
-          ? [{ required: true, message: `${field.label} 必填` }]
-          : undefined
-      }
-    >
+    <Form.Item name={field.name} label={field.label} rules={rules}>
       <Input1
         placeholder={field.placeholder}
-        {...(field.type === "textarea" ? { rows: 3 } : {})}
+        {...(field.type === "textarea" || field.type === "json"
+          ? { rows: 5 }
+          : {})}
       />
     </Form.Item>
+  );
+}
+
+interface PolicyTagOption<T extends string> {
+  label: string;
+  value: T;
+  disabled?: boolean;
+}
+
+function PolicyTagGroup<T extends string>({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+}: {
+  value?: T;
+  options: PolicyTagOption<T>[];
+  onChange?: (value: T) => void;
+  ariaLabel: string;
+}) {
+  return (
+    <div
+      className={styles.qqGroupPolicyTags}
+      role="radiogroup"
+      aria-label={ariaLabel}
+    >
+      {options.map((option) => {
+        const checked = value === option.value;
+        return (
+          <button
+            key={option.value}
+            className={`${styles.qqGroupPolicyTag} ${
+              checked ? styles.qqGroupPolicyTagChecked : ""
+            } ${option.disabled ? styles.qqGroupPolicyTagDisabled : ""}`}
+            type="button"
+            role="radio"
+            aria-checked={checked}
+            disabled={option.disabled}
+            tabIndex={option.disabled ? -1 : 0}
+            onClick={() => {
+              if (!checked && !option.disabled) {
+                onChange?.(option.value);
+              }
+            }}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function QqGroupContextPolicyFields({
+  form,
+}: {
+  form: FormInstance<ChannelFormValues>;
+}) {
+  const { t } = useTranslation();
+  useEffect(() => {
+    form.setFieldValue(
+      "group_context",
+      normalizeQqGroupContextConfig(form.getFieldValue("group_context")),
+    );
+  }, [form]);
+  const watchedEnabled = Form.useWatch(["group_context", "enabled"], form);
+  const watchedVisibility = Form.useWatch(
+    ["group_context", "visibility"],
+    form,
+  );
+  const watchedActivation = Form.useWatch(
+    ["group_context", "activation"],
+    form,
+  );
+  const policy = normalizeQqGroupContextConfig(
+    form.getFieldValue("group_context"),
+  );
+  const enabled =
+    typeof watchedEnabled === "boolean" ? watchedEnabled : policy.enabled;
+  const visibility = (watchedVisibility ??
+    policy.visibility) as QqGroupVisibility;
+  const activation = (watchedActivation ??
+    policy.activation) as QqGroupActivation;
+
+  const updatePolicy = (patch: Partial<QqGroupContextConfig>) => {
+    form.setFieldValue("group_context", {
+      ...normalizeQqGroupContextConfig(form.getFieldValue("group_context")),
+      ...patch,
+    });
+  };
+
+  const handleVisibilityChange = (value: string | number) => {
+    const nextVisibility = value as QqGroupVisibility;
+    updatePolicy({
+      visibility: nextVisibility,
+      activation: nextVisibility === "all" ? activation : "mention",
+      history: nextVisibility === "mention_only" ? "none" : "recent",
+    });
+  };
+
+  return (
+    <div className={styles.qqGroupPolicy}>
+      <div className={styles.qqGroupPolicyHeader}>
+        <div>
+          <div className={styles.qqGroupPolicyTitle}>
+            {t("channels.qqGroupPolicyTitle")}
+          </div>
+          <div className={styles.qqGroupPolicyDescription}>
+            {t("channels.qqGroupPolicyDescription")}
+          </div>
+        </div>
+        <Form.Item
+          name={["group_context", "enabled"]}
+          valuePropName="checked"
+          noStyle
+        >
+          <Switch />
+        </Form.Item>
+      </div>
+
+      {enabled && (
+        <>
+          <Form.Item
+            name={["group_context", "visibility"]}
+            label={t("channels.qqGroupVisibility")}
+          >
+            <PolicyTagGroup<QqGroupVisibility>
+              ariaLabel={t("channels.qqGroupVisibility")}
+              onChange={handleVisibilityChange}
+              options={[
+                {
+                  label: t("channels.qqGroupVisibilityAuto"),
+                  value: "auto",
+                },
+                {
+                  label: t("channels.qqGroupVisibilityMentionOnly"),
+                  value: "mention_only",
+                },
+                {
+                  label: t("channels.qqGroupVisibilityMentionRecent"),
+                  value: "mention_recent",
+                },
+                {
+                  label: t("channels.qqGroupVisibilityAll"),
+                  value: "all",
+                },
+              ]}
+            />
+          </Form.Item>
+
+          <div className={styles.qqGroupPolicyGrid}>
+            <Form.Item
+              name={["group_context", "activation"]}
+              label={t("channels.qqGroupActivation")}
+            >
+              <PolicyTagGroup<QqGroupActivation>
+                ariaLabel={t("channels.qqGroupActivation")}
+                options={[
+                  {
+                    label: t("channels.qqGroupActivationMention"),
+                    value: "mention",
+                  },
+                  {
+                    label: t("channels.qqGroupActivationAlways"),
+                    value: "always",
+                    disabled: visibility !== "all",
+                  },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item
+              name={["group_context", "history_limit"]}
+              label={t("channels.qqGroupHistoryLimit")}
+              rules={[{ type: "number", min: 0, max: 50 }]}
+            >
+              <InputNumber
+                min={0}
+                max={50}
+                precision={0}
+                disabled={visibility === "mention_only"}
+                style={{ width: "100%" }}
+              />
+            </Form.Item>
+          </div>
+
+          <Form.Item
+            name={["group_context", "clear_after_reply"]}
+            label={t("channels.qqGroupClearAfterReply")}
+            tooltip={t("channels.qqGroupClearAfterReplyDesc")}
+            valuePropName="checked"
+          >
+            <Switch />
+          </Form.Item>
+
+          {activation === "always" && (
+            <Alert
+              showIcon
+              type="warning"
+              message={t("channels.qqGroupAlwaysWarning")}
+            />
+          )}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -271,6 +500,46 @@ export function ChannelDrawer({
     if (draft.kind) setSelectedKind(draft.kind);
     restoringDraftRef.current = false;
   }, [open, loadingConfig, draftScope, form]);
+
+  // ── QQ Bot Flow ────────────────────────────────────────────────────────
+  const startQqQr = useCallback(async () => {
+    setQrState({ phase: "loading" });
+    try {
+      const res = await channelApi.qqQrcodeGenerate(agentId);
+      setQrState({
+        phase: "qq_ready",
+        qrcodeUrl: res.qrcode_url,
+        qrcodeToken: res.qrcode_token,
+      });
+      const timer = setInterval(async () => {
+        try {
+          const poll = await channelApi.qqQrcodePoll(agentId, res.qrcode_token);
+          if (poll.status === "success" && poll.app_id && poll.secret) {
+            stopPolling();
+            setQrState({
+              phase: "qq_success",
+              appId: poll.app_id,
+              secret: poll.secret,
+            });
+          } else if (poll.status === "error" || poll.status === "expired") {
+            stopPolling();
+            setQrState({
+              phase: "error",
+              reason: poll.message ?? t("channels.qqQrFailed"),
+            });
+          }
+        } catch {
+          // network error — keep polling
+        }
+      }, 2000);
+      pollTimerRef.current = timer;
+    } catch (e: unknown) {
+      setQrState({
+        phase: "error",
+        reason: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }, [agentId, stopPolling, t]);
 
   // ── WeCom Flow ─────────────────────────────────────────────────────────
   const startWecomQr = useCallback(async () => {
@@ -517,6 +786,14 @@ export function ChannelDrawer({
     [getDisplayConfig],
   );
 
+  const getQqGroupContextConfig = useCallback(
+    () =>
+      normalizeQqGroupContextConfig(
+        form.getFieldValue("group_context") ?? DEFAULT_QQ_GROUP_CONTEXT_CONFIG,
+      ),
+    [form],
+  );
+
   const submitChannel = useCallback(
     async (
       kind: ChannelKey,
@@ -554,6 +831,17 @@ export function ChannelDrawer({
         kind: "wecom",
         name: "wecom",
         config: mergeDisplayConfig({ bot_id: s.botId, secret: s.secret }),
+      };
+    } else if (s.phase === "qq_success") {
+      dedupeKey = `qq:${s.appId}:${s.secret}`;
+      payload = {
+        kind: "qq",
+        name: "qq",
+        config: mergeDisplayConfig({
+          app_id: s.appId,
+          secret: s.secret,
+          group_context: getQqGroupContextConfig(),
+        }),
       };
     } else if (s.phase === "weixin_success") {
       dedupeKey = `weixin:${s.accountId}:${s.token}`;
@@ -616,7 +904,15 @@ export function ChannelDrawer({
         }
       },
     );
-  }, [qrState, isEdit, saving, submitChannel, mergeDisplayConfig, form]);
+  }, [
+    qrState,
+    isEdit,
+    saving,
+    submitChannel,
+    mergeDisplayConfig,
+    getQqGroupContextConfig,
+    form,
+  ]);
 
   const showFooterSave =
     configMode === "manual" || isEdit || !supportsQuickConfig;
@@ -684,7 +980,7 @@ export function ChannelDrawer({
     if (hasSchema) {
       for (const [k, v] of Object.entries(rest)) {
         if (k === "name" || v === undefined || v === null || v === "") continue;
-        config[k] = v;
+        config[k] = normalizeChannelFieldValue(k, v);
       }
     } else if (__raw_config !== undefined) {
       const trimmed = __raw_config.trim();
@@ -706,6 +1002,111 @@ export function ChannelDrawer({
   };
 
   // ── QR Panels ───────────────────────────────────────────────────────────
+  function renderQqPanel() {
+    const s = qrState;
+    if (s.phase === "loading")
+      return (
+        <div className={styles.qrPanel}>
+          <Spin />
+        </div>
+      );
+    if (s.phase === "qq_success") {
+      const retrySave = () =>
+        submitChannel(
+          "qq",
+          "qq",
+          mergeDisplayConfig({
+            app_id: s.appId,
+            secret: s.secret,
+            group_context: getQqGroupContextConfig(),
+          }),
+          true,
+        );
+      return (
+        <div className={styles.qrPanel}>
+          <Alert
+            type="success"
+            message={t("channels.qqQrSuccess")}
+            description={`App ID: ${s.appId}`}
+            style={{ width: "100%", marginBottom: 12 }}
+          />
+          {renderQrAutoSaveStatus(retrySave)}
+        </div>
+      );
+    }
+    if (s.phase === "qq_ready") {
+      return (
+        <div className={styles.qrPanel}>
+          <div className={styles.qrSteps}>
+            <span className={styles.qrStep}>
+              <span className={styles.qrDot}>1</span>
+              {t("channels.qqQrStep1")}
+            </span>
+            <span className={styles.qrStepDivider} />
+            <span className={styles.qrStep}>
+              <span className={styles.qrDot}>2</span>
+              {t("channels.qqQrStep2")}
+            </span>
+            <span className={styles.qrStepDivider} />
+            <span className={styles.qrStep}>
+              <span className={styles.qrDot}>3</span>
+              {t("channels.qqQrStep3")}
+            </span>
+          </div>
+          <div className={styles.qrCardWrap}>
+            <div className={styles.qrFrame}>
+              <QRCodeSVG value={s.qrcodeUrl} size={200} />
+            </div>
+          </div>
+          <p className={styles.qrScanHint}>{t("channels.qqQrScanHint")}</p>
+          <Button size="small" onClick={resetQr} style={{ marginTop: 4 }}>
+            {t("channels.qrRetry")}
+          </Button>
+        </div>
+      );
+    }
+    if (s.phase === "error") {
+      return (
+        <div className={styles.qrPanel}>
+          <Alert
+            type="error"
+            message={s.reason}
+            style={{ width: "100%", marginBottom: 12 }}
+          />
+          <Button onClick={() => void startQqQr()}>
+            {t("channels.qrRetry")}
+          </Button>
+        </div>
+      );
+    }
+    return (
+      <div className={styles.quickConfigPanel}>
+        <div className={styles.quickConfigSteps}>
+          <div className={styles.quickConfigStep}>
+            <span className={styles.stepNumber}>1</span>
+            {t("channels.qqQrIntro1")}
+          </div>
+          <div className={styles.quickConfigStep}>
+            <span className={styles.stepNumber}>2</span>
+            {t("channels.qqQrIntro2")}
+          </div>
+          <div className={styles.quickConfigStep}>
+            <span className={styles.stepNumber}>3</span>
+            {t("channels.qqQrIntro3")}
+          </div>
+        </div>
+        <Button
+          type="primary"
+          className={styles.quickConfigBtn}
+          block
+          onClick={() => void startQqQr()}
+        >
+          {t("channels.qqQrGenerate")}
+        </Button>
+      </div>
+    );
+  }
+
   function renderWecomPanel() {
     const s = qrState;
     if (s.phase === "loading")
@@ -1222,10 +1623,13 @@ export function ChannelDrawer({
             />
           )}
 
+          {selectedKind === "qq" && <QqGroupContextPolicyFields form={form} />}
+
           {(configMode === "quick" || isQuickOnly) &&
             supportsQuickConfig &&
             !isEdit && (
               <>
+                {selectedKind === "qq" && renderQqPanel()}
                 {selectedKind === "wecom" && renderWecomPanel()}
                 {selectedKind === "weixin" && renderWeixinPanel()}
                 {selectedKind === "feishu" && renderFeishuPanel()}
