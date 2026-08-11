@@ -23,6 +23,8 @@ interface UseChatSendParams {
   selectedConnectors: string[];
   selectedSkills: string[];
   selectedTargetAgents: string[];
+  reasoningMode: "auto" | "enabled" | "disabled";
+  reasoningEffort: string | null;
   defaultModel?: string | null;
   sendMessage: (
     text: string,
@@ -35,6 +37,8 @@ interface UseChatSendParams {
     skills?: string[] | null,
     targetAgentIds?: string[] | null,
     composerContext?: UserComposerContext,
+    reasoningMode?: "auto" | "enabled" | "disabled",
+    reasoningEffort?: string | null,
   ) => void;
   createSession: () => { session: Session; resolvedId: Promise<string> };
   renameSession: (id: string, name: string) => void;
@@ -70,6 +74,8 @@ export function useChatSend({
   selectedConnectors,
   selectedSkills,
   selectedTargetAgents,
+  reasoningMode,
+  reasoningEffort,
   defaultModel,
   sendMessage,
   createSession,
@@ -118,6 +124,10 @@ export function useChatSend({
           connectors,
           targetAgents,
           selectedModel: modelSelection,
+          reasoningMode:
+            overrides?.composerContext?.reasoningMode ?? reasoningMode,
+          reasoningEffort:
+            overrides?.composerContext?.reasoningEffort ?? reasoningEffort,
         });
 
       const modelOverride =
@@ -138,6 +148,8 @@ export function useChatSend({
           skills,
           targetAgents,
           composerContext,
+          composerContext?.reasoningMode ?? reasoningMode,
+          composerContext?.reasoningEffort ?? reasoningEffort,
         );
       };
 
@@ -158,6 +170,9 @@ export function useChatSend({
 
       const { resolvedId } = createSession();
       const snap = chatStore.getSnapshot(EMPTY_CHAT_SESSION_KEY);
+      // Break any leftover ``__pending__`` → previous thr_* alias so this new
+      // chat cannot mutate / stream into an older thread's bucket.
+      chatStore.detachSessionKey(PENDING_THREAD_ID);
       chatStore.setMessages(PENDING_THREAD_ID, snap.messages);
       chatStore.clearMessages(EMPTY_CHAT_SESSION_KEY);
       navigate(`/chat/${agent}/${PENDING_THREAD_ID}`);
@@ -185,6 +200,8 @@ export function useChatSend({
           connectors,
           skills,
           targetAgents,
+          composerContext?.reasoningMode ?? reasoningMode,
+          composerContext?.reasoningEffort ?? reasoningEffort,
         );
         navigate(`/chat/${agent}/${tid}`, { replace: true });
       });
@@ -203,6 +220,8 @@ export function useChatSend({
       selectedConnectors,
       selectedSkills,
       selectedTargetAgents,
+      reasoningMode,
+      reasoningEffort,
       defaultModel,
       t,
     ],

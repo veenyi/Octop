@@ -19,7 +19,9 @@ from octop.infra.agents.providers.probe import (
     probe_provider_row,
     provider_headers,
 )
+from octop.infra.agents.providers.reasoning import reasoning_capability
 from octop.infra.agents.providers.resolved import list_resolved_models as _list_resolved_models
+from octop.infra.agents.providers.store import clear_stale_pins_for_provider
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.providers.codex_apply import (
     CODEX_PROVIDER_NAME,
@@ -110,13 +112,21 @@ async def _maybe_refresh_codex_row(server: Any, row: Any) -> Any:
 
 
 def _row_to_dict(r: Any) -> dict[str, Any]:
+    models: list[dict[str, Any]] = []
+    for stored in r.get_models():
+        model = dict(stored)
+        capability = reasoning_capability(model, base_url=r.base_url)
+        if capability is not None:
+            model["reasoning"] = True
+            model["reasoning_config"] = capability
+        models.append(model)
     return {
         "id": r.id,
         "name": r.name,
         "kind": r.kind,
         "base_url": r.base_url,
         "api_key": r.api_key,
-        "models": r.get_models(),
+        "models": models,
         "note": r.note,
         "enabled": bool(r.enabled),
     }
@@ -238,6 +248,13 @@ async def admin_patch_provider(
         note=body.note,
         enabled=body.enabled,
     )
+    if body.models is not None:
+        clear_stale_pins_for_provider(
+            agent_repo=server.services.agent_repo,
+            settings_repo=server.services.settings_repo,
+            provider_name=row.name,
+            models=body.models,
+        )
     if server.app_runtime and _patch_requires_provider_rehydrate(body):
         await server.app_runtime.agent_registry.on_provider_changed(provider_name=row.name)
     return _row_to_dict(server.services.provider_repo.get(provider_id))

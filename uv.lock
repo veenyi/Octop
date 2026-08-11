@@ -904,6 +904,20 @@ wheels = [
 ]
 
 [[package]]
+name = "docker"
+version = "7.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pywin32", marker = "sys_platform == 'win32'" },
+    { name = "requests" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/88/7f/731ff914b0255d3d065f45fd4e626d4b8c95dbcbaada049f337a6ac16410/docker-7.2.0.tar.gz", hash = "sha256:cebb93773d334f778e023a7ee352a8d6e13ab1bd3b863a4d4a59dec897df43ac", size = 118731, upload-time = "2026-07-09T14:53:46.39Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/75/23/529140fe1aab80fc6992f93a706deec709140a6397439139a054e1515c45/docker-7.2.0-py3-none-any.whl", hash = "sha256:a3f45fdeb9165e2d25d9a1d02ddf3bc70fb572cf5ebbf9b58558c22caf29b71f", size = 148775, upload-time = "2026-07-09T14:53:45.224Z" },
+]
+
+[[package]]
 name = "docstring-parser"
 version = "0.18.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1247,7 +1261,7 @@ wheels = [
 
 [[package]]
 name = "harness-gateway"
-version = "0.9.1"
+version = "0.9.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -1265,9 +1279,9 @@ dependencies = [
     { name = "websockets" },
     { name = "wecom-aibot-sdk" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/65/44/a018c5e6aab7a66c132e1a8017f8e170392ffa76de50c1c0eaa87151d7c0/harness_gateway-0.9.1.tar.gz", hash = "sha256:0dc055307b69f1408c6fe15b9a68a8794b5a596e64b71a5cd07400e0fd2a1d28", size = 493449, upload-time = "2026-08-05T11:11:00.777Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/b3/51b707a92829f01c9baeb725854f1f293ff4e3e5e9d7f492e24876ed2336/harness_gateway-0.9.2.tar.gz", hash = "sha256:b6219a098cce91e88f84b337eae6b349ffa4475d2f4d0afa492372f8c6633187", size = 493828, upload-time = "2026-08-10T14:56:59.782Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/12/d7/479bc4b891619b1c05584035d84fa5db381ad8863dc2f690792b013967ad/harness_gateway-0.9.1-py3-none-any.whl", hash = "sha256:3af6adbcddc3e279670420ff27af80a08214b3447b11bbb73e934abdfc7792ff", size = 136924, upload-time = "2026-08-05T11:10:57.857Z" },
+    { url = "https://files.pythonhosted.org/packages/3a/83/f3735c5609796126cef04f697ac26355f580853038f058938c8139bf14f1/harness_gateway-0.9.2-py3-none-any.whl", hash = "sha256:1fa7df9a4f26a20e2dffb622145c916c896f403289d60efb610d15afca6e3269", size = 137219, upload-time = "2026-08-10T14:56:57.241Z" },
 ]
 
 [[package]]
@@ -2184,7 +2198,7 @@ wheels = [
 
 [[package]]
 name = "octop"
-version = "0.9.19"
+version = "0.9.21"
 source = { editable = "." }
 dependencies = [
     { name = "acme" },
@@ -2203,6 +2217,7 @@ dependencies = [
     { name = "langgraph-checkpoint-postgres" },
     { name = "mcp" },
     { name = "orcakit-harness-agent", extra = ["all"] },
+    { name = "pillow" },
     { name = "playwright" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
@@ -2221,7 +2236,6 @@ browser = [
 ]
 desktop = [
     { name = "mss" },
-    { name = "pillow" },
     { name = "pynput" },
 ]
 dev = [
@@ -2257,7 +2271,7 @@ requires-dist = [
     { name = "edge-tts", specifier = ">=6.1" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "harness-browser", specifier = ">=0.7.4" },
-    { name = "harness-gateway", specifier = ">=0.9.1" },
+    { name = "harness-gateway", specifier = ">=0.9.2" },
     { name = "harness-memory", specifier = ">=0.9.5" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "josepy", specifier = ">=2.2.0" },
@@ -2266,8 +2280,8 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.9,<2" },
     { name = "mss", marker = "extra == 'desktop'", specifier = ">=9.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
-    { name = "orcakit-harness-agent", extras = ["all"], specifier = ">=0.9.19" },
-    { name = "pillow", marker = "extra == 'desktop'", specifier = ">=10.0" },
+    { name = "orcakit-harness-agent", extras = ["all"], specifier = ">=0.9.20" },
+    { name = "pillow", specifier = ">=10.0" },
     { name = "playwright", specifier = ">=1.40" },
     { name = "playwright", marker = "extra == 'browser'", specifier = ">=1.40" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
@@ -2400,7 +2414,7 @@ wheels = [
 
 [[package]]
 name = "orcakit-harness-agent"
-version = "0.9.19"
+version = "0.9.20"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "deepagents" },
@@ -2418,9 +2432,9 @@ dependencies = [
     { name = "mcp" },
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2d/e4/87f4f731f98f198c9e46058303cb0300cf487a5358ff55ad78f33a0417f8/orcakit_harness_agent-0.9.19.tar.gz", hash = "sha256:545ac33c0082cd47531e9634e9db4a4dd2ba463394e4fe8989bfaff56fb21676", size = 1127506, upload-time = "2026-08-05T10:30:15.305Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ca/7e/5c749a8b53debaaa175fdad66c81963daf9b6559deabd10bafd0d366155b/orcakit_harness_agent-0.9.20.tar.gz", hash = "sha256:dac5112226c633bf3a0e07193cde430a6d2901b6dae35b4514166e4da28322ce", size = 1144223, upload-time = "2026-08-10T14:53:41.171Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/59/f3/cd4e01017eb47bb815ff607a0936d821f961e572aa23100eaf2628c76e0b/orcakit_harness_agent-0.9.19-py3-none-any.whl", hash = "sha256:58291ea2be33b4307dd461daac02257c9403bb2a1979212f3966c9bc70d87df7", size = 1348523, upload-time = "2026-08-05T10:30:11.619Z" },
+    { url = "https://files.pythonhosted.org/packages/df/a5/1f0f1c3c700ba97cbd472a356d8bff4f58e21c2a2dc3987e57c586db3bf3/orcakit_harness_agent-0.9.20-py3-none-any.whl", hash = "sha256:41e9311222d118e8c26f066b71131bdd2d2ecf6e4572e0c62eaef8e5598294c4", size = 1364449, upload-time = "2026-08-10T14:53:37.634Z" },
 ]
 
 [package.optional-dependencies]
@@ -2428,6 +2442,7 @@ all = [
     { name = "agent-client-protocol" },
     { name = "cos-python-sdk-v5" },
     { name = "deepagents-backends" },
+    { name = "docker" },
     { name = "esdk-obs-python" },
     { name = "google-api-python-client" },
     { name = "langchain-aws" },

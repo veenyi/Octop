@@ -16,6 +16,7 @@ from octop.api.routers.chat.serialize import (
 )
 from octop.infra.agents.context_breakdown import SEGMENT_KEYS, compute_context_breakdown
 from octop.infra.errors import ErrorCode, OctopError
+from octop.infra.gateway.hitl.coordinator import pending_hitl_payload
 from octop.infra.gateway.threads import ThreadRegistry, thread_row_has_messages
 
 router = APIRouter()
@@ -58,6 +59,9 @@ async def list_threads(
             "is_active": r.thread_id == bound,
             "has_messages": thread_row_has_messages(r),
             "pinned": r.pinned,
+            "model_ref": r.model_ref,
+            "reasoning_mode": r.reasoning_mode,
+            "reasoning_effort": r.reasoning_effort,
         }
         for r in rows
     ]
@@ -109,11 +113,12 @@ async def get_thread_context_usage(
     """Return persisted context-window usage for a thread (harness-agent snapshot)."""
     _require_thread(server, agent_id, thread_id, user, as_user)
     registry = server.app_runtime.agent_registry
+    effective_max = registry.resolve_context_max_tokens(agent_id, fallback=max_tokens)
     breakdown = await compute_context_breakdown(
         registry,
         agent_id=agent_id,
         thread_id=thread_id,
-        max_tokens=max_tokens,
+        max_tokens=effective_max,
         input_tokens=input_tokens,
         mcp_servers=_parse_csv_query(mcp_servers),
         skills=_parse_csv_query(skills),
@@ -156,6 +161,13 @@ async def get_thread_history(
         offset=page_offset,
         user=user,
     )
+    effective_uid = as_user if as_user is not None else user.id
+    hitl_pending = pending_hitl_payload(
+        server.app_runtime.gateway.processor.hitl_coordinator.store,
+        thread_id=thread_id,
+        agent_id=agent_id,
+        user_id=effective_uid,
+    )
     return {
         "thread_id": thread_id,
         "messages": messages,
@@ -163,6 +175,7 @@ async def get_thread_history(
         "limit": page_limit,
         "offset": page_offset,
         "turn_active": server.app_runtime.gateway.ws_hub.is_turn_active(thread_id),
+        "hitl_pending": hitl_pending,
     }
 
 
@@ -211,25 +224,59 @@ async def patch_thread(
     user: Any = Depends(current_user),
     server: Any = Depends(get_server),
 ) -> dict[str, Any]:
-    """Rename a thread or toggle its pinned state in the sidebar."""
+    """Update sidebar metadata or sticky composer settings for a thread."""
     row = _require_thread(server, agent_id, thread_id, user, as_user)
-    if body.title is None and body.pinned is None:
+    composer_fields = {"model_ref", "reasoning_mode", "reasoning_effort"}
+    if (
+        body.title is None
+        and body.pinned is None
+        and not body.model_fields_set.intersection(composer_fields)
+    ):
         return {
             "thread_id": thread_id,
             "title": row.title,
             "pinned": row.pinned,
+            "model_ref": row.model_ref,
+            "reasoning_mode": row.reasoning_mode,
+            "reasoning_effort": row.reasoning_effort,
         }
     registry = server.app_runtime.gateway.thread_registry
     if body.title is not None:
         registry.update_title(thread_id, body.title)
     if body.pinned is not None:
         registry.set_pinned(thread_id, body.pinned)
+    model_ref: str | None | object = ...
+    reasoning_mode: str | None | object = ...
+    reasoning_effort: str | None | object = ...
+    if "model_ref" in body.model_fields_set:
+        model_ref = (body.model_ref or "").strip() or None
+        if (
+            model_ref is not None
+            and not server.app_runtime.agent_registry.providers.is_model_ref_usable(model_ref)
+        ):
+            raise OctopError(
+                ErrorCode.SLASH_BAD_ARGS,
+                "model_ref must reference an enabled model",
+            )
+    if "reasoning_mode" in body.model_fields_set:
+        reasoning_mode = body.reasoning_mode
+    if "reasoning_effort" in body.model_fields_set:
+        reasoning_effort = (body.reasoning_effort or "").strip().lower() or None
+    registry.update_composer(
+        thread_id,
+        model_ref=model_ref,
+        reasoning_mode=reasoning_mode,
+        reasoning_effort=reasoning_effort,
+    )
     updated = registry.get_thread(thread_id)
     assert updated is not None
     return {
         "thread_id": thread_id,
         "title": updated.title,
         "pinned": updated.pinned,
+        "model_ref": updated.model_ref,
+        "reasoning_mode": updated.reasoning_mode,
+        "reasoning_effort": updated.reasoning_effort,
     }
 
 

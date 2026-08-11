@@ -17,12 +17,17 @@ from octop.config import DatabaseConfig
 from octop.infra.backup.manifest import MANIFEST_VERSION, AgentBackupEntry, BackupManifest
 from octop.infra.backup.pg_dump import dump_postgres, restore_postgres
 from octop.infra.backup.snapshot import (
+    capture_jwt_secret_from_pool,
     capture_users_from_pool,
+    infer_owner_user_id,
+    prune_users_not_in,
+    remap_ownership_to_user,
+    restore_jwt_secret_into_pool,
     restore_sqlite_into_pool,
-    restore_users_into_pool,
     snapshot_sqlite_file,
+    upsert_users_into_pool,
 )
-from octop.infra.db.migrate import _current_version
+from octop.infra.db.migrate import _current_version, run_migrations
 from octop.infra.db.pool import DatabasePool, SqlitePool
 from octop.infra.db.repos.secrets import SecretRepo
 from octop.infra.errors import ErrorCode, OctopError
@@ -184,27 +189,32 @@ def restore_system_backup(
     db_config: DatabaseConfig,
     restore_config: bool = True,
     preserve_users: bool | None = None,
+    owner_user_id: int | None = None,
 ) -> dict[str, Any]:
     """Restore database, workspaces, and optional config from a tar.gz archive.
 
-    ``preserve_users`` controls whether the *current* Octop instance's ``users``
-    table is written back after the database is replaced:
+    ``preserve_users`` controls whether the *current* Octop instance's login
+    credentials (``users`` rows + ``secrets.jwt``) are written back after the
+    database is replaced:
 
-    * ``None`` (default) — auto-detect: preserves users when the backup was
-      produced by an external migration tool (``octop_version`` ends with
+    * ``None`` (default) — auto-detect: preserves credentials when the backup
+      was produced by an external migration tool (``octop_version`` ends with
       ``"-migrated-from-lightclaw"``).
-    * ``True`` — always preserve the current users (useful for any cross-system
-      import where passwords must remain valid).
-    * ``False`` — restore the users table as-is from the backup (normal
-      same-instance restore).
+    * ``True`` — always preserve current users + JWT secret (cross-system
+      import where passwords and outstanding sessions must remain valid).
+    * ``False`` — restore the users/secrets tables as-is from the backup
+      (normal same-instance restore).
+
+    For LightClaw migration archives, ``owner_user_id`` (typically the admin
+    performing the restore) receives all imported ``user_id`` ownership. When
+    omitted, the first preserved admin (else first preserved user) is used.
     """
     members = _read_tar_members(data)
     manifest = _extract_manifest(members)
+    is_migration = _is_migration_backup(manifest)
 
     # Resolve effective preserve_users flag before touching the DB.
-    effective_preserve_users = (
-        _is_migration_backup(manifest) if preserve_users is None else preserve_users
-    )
+    effective_preserve_users = is_migration if preserve_users is None else preserve_users
 
     archive_driver = manifest.database_driver or "sqlite"
     if archive_driver != pool.dialect:
@@ -220,11 +230,28 @@ def restore_system_backup(
     if db_blob is None:
         raise OctopError(ErrorCode.SLASH_BAD_ARGS, "backup archive missing database file")
 
-    # Capture current users before overwriting the DB (only when needed).
+    # Capture current login credentials before overwriting the DB (only when needed).
     saved_users: list[tuple[object, ...]] = []
+    saved_jwt: bytes | None = None
     if effective_preserve_users and pool is not None:
         saved_users = capture_users_from_pool(pool)
+        saved_jwt = capture_jwt_secret_from_pool(pool)
 
+    effective_owner: int | None = None
+    if is_migration:
+        effective_owner = owner_user_id
+        if effective_owner is None:
+            effective_owner = infer_owner_user_id(saved_users)
+        if effective_owner is not None and saved_users:
+            saved_ids = {int(str(row[0])) for row in saved_users}
+            if int(effective_owner) not in saved_ids:
+                raise OctopError(
+                    ErrorCode.SLASH_BAD_ARGS,
+                    f"owner_user_id={effective_owner} is not among current users",
+                    status=400,
+                )
+
+    ownership_remap: dict[str, int] | None = None
     with tempfile.TemporaryDirectory() as tmp:
         if pool.dialect == "postgresql":
             dump_path = Path(tmp) / "octop.dump"
@@ -249,16 +276,22 @@ def restore_system_backup(
                 env_path.parent.mkdir(parents=True, exist_ok=True)
                 env_path.write_bytes(env_blob)
 
-        # Write back saved users after DB is fully restored.
+        # Migration ownership remap must run after the target owner exists and
+        # before pruning backup placeholder users (avoids ON DELETE CASCADE).
         if saved_users and pool is not None:
-            restore_users_into_pool(pool, saved_users)
+            upsert_users_into_pool(pool, saved_users)
+            if is_migration and effective_owner is not None:
+                ownership_remap = remap_ownership_to_user(pool, int(effective_owner))
+            prune_users_not_in(pool, [row[0] for row in saved_users])
 
-        # After a migration restore the secrets table arrives from a foreign
-        # system and will not contain a valid JWT secret for this instance.
-        # Ensure one exists (create if absent) so the server can start without
-        # a manual `_ensure_jwt_secret` call.
+        # Migration backups ship a foreign ``secrets`` table. Prefer the current
+        # instance's JWT secret so outstanding sessions stay valid; only seed a
+        # fresh key when this instance never had one.
         if effective_preserve_users and pool is not None:
-            SecretRepo(pool).get_or_create("jwt", lambda: os.urandom(32))
+            if saved_jwt is not None:
+                restore_jwt_secret_into_pool(pool, saved_jwt)
+            else:
+                SecretRepo(pool).get_or_create("jwt", lambda: os.urandom(32))
 
         restored_workspaces = 0
         prefix = f"{_WORKSPACES_DIR}/"
@@ -294,13 +327,24 @@ def restore_system_backup(
             dest.write_bytes(blob)
             restored_skill_package_files += 1
 
-    return {
-        "schema_version": manifest.schema_version,
+        # LightClaw migration exports (and older Octop backups) may ship schema v1
+        # without columns added in later migrations (e.g. cron_jobs.mcp_servers).
+        # API restore keeps the process alive, so re-apply migrations on the live pool.
+        run_migrations(pool)
+        schema_version = _current_version(pool)
+
+    result: dict[str, Any] = {
+        "schema_version": schema_version,
         "octop_version": manifest.octop_version,
         "agents": len(manifest.agents),
         "workspace_files": restored_workspaces,
         "skill_package_files": restored_skill_package_files,
         "restore_config": restore_config,
         "users_preserved": effective_preserve_users,
+        "jwt_preserved": bool(saved_jwt is not None and effective_preserve_users),
         "database_driver": archive_driver,
     }
+    if ownership_remap is not None:
+        result["owner_user_id"] = int(effective_owner) if effective_owner is not None else None
+        result["ownership_remap"] = ownership_remap
+    return result

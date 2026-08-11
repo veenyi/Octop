@@ -35,6 +35,7 @@ import logging
 import os
 import shutil
 import tempfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -595,6 +596,22 @@ class ImportSkillBody(BaseModel):
     overwrite: bool = False
 
 
+async def _write_skill_files(
+    workspace: Any,
+    skill_root: str,
+    files: Sequence[tuple[str, bytes]],
+) -> None:
+    """Write skill files into a workspace, creating empty directories first."""
+    dirs = [path for path, _content in files if path.endswith("/")]
+    payload = [(path, content) for path, content in files if not path.endswith("/")]
+    for path in dirs:
+        await workspace.amkdir(f"{skill_root}/{path}".rstrip("/"))
+    if payload:
+        await workspace.aupload_many(
+            [(f"{skill_root}/{path}", content) for path, content in payload]
+        )
+
+
 def _files_from_skill_body(
     *,
     content: str,
@@ -636,17 +653,23 @@ async def create_skill(
         raise OctopError(ErrorCode.SLASH_BAD_ARGS, str(exc)) from exc
     except SkillPackageError:
         raise OctopError(ErrorCode.NOT_FOUND, "invalid skill name") from None
-    target = package.workspace_uploads()[0][0]
     await _guard_package_only_skill_write(ctx.workspace, ctx.config, server, name)
-    # Don't clobber an existing skill — return 409 instead.
-    existing = await _aread_text(ctx.workspace, target)
+    # Conflict check must use SKILL.md — ZIP payloads often list siblings first,
+    # and soft-delete only marks the manifest (leaving sibling files behind).
+    existing = await _aread_text(ctx.workspace, f"skills/{name}/SKILL.md")
     if existing is not None:
         meta, _ = _parse_frontmatter(existing)
         if not meta.get("removed") and not body.overwrite:
             raise OctopError(ErrorCode.SKILL_ALREADY_EXISTS, f"skill {name!r} already exists")
     with contextlib.suppress(Exception):
         await ctx.workspace.adelete(f"skills/{name}")
-    await ctx.workspace.aupload_many(package.workspace_uploads())
+    await _write_skill_files(ctx.workspace, f"skills/{name}", package.files)
+    # Reinstall after disable/delete must clear skills_disabled (ZIP create
+    # always installs as enabled, matching URL import with enable=True).
+    disabled = _disabled_set(ctx.config)
+    if name in disabled:
+        disabled.discard(name)
+        await _persist_disabled(server, agent_id, disabled)
     skill_md = next(
         (content for path, content in package.files if path == "SKILL.md"),
         body.content.encode("utf-8"),
@@ -678,9 +701,8 @@ async def update_skill(
     except SkillPackageError:
         raise OctopError(ErrorCode.NOT_FOUND, "invalid skill name") from None
 
-    target = package.workspace_uploads()[0][0]
     await _guard_package_only_skill_write(ctx.workspace, ctx.config, server, slug)
-    existing = await _aread_text(ctx.workspace, target)
+    existing = await _aread_text(ctx.workspace, f"skills/{slug}/SKILL.md")
     if existing is None:
         raise OctopError(ErrorCode.NOT_FOUND, f"skill {slug!r} not found")
     meta_existing, _ = _parse_frontmatter(existing)
@@ -689,7 +711,7 @@ async def update_skill(
 
     with contextlib.suppress(Exception):
         await ctx.workspace.adelete(f"skills/{slug}")
-    await ctx.workspace.aupload_many(package.workspace_uploads())
+    await _write_skill_files(ctx.workspace, f"skills/{slug}", package.files)
     skill_md = next(
         (content for path, content in package.files if path == "SKILL.md"),
         body.content.encode("utf-8"),
@@ -727,8 +749,7 @@ class _AgentWorkspaceInstallTarget:
         skill_root = f"skills/{slug}"
         with contextlib.suppress(Exception):
             await self._workspace.adelete(skill_root)
-        uploads = [(f"{skill_root}/{path}", content) for path, content in files]
-        await self._workspace.aupload_many(uploads)
+        await _write_skill_files(self._workspace, skill_root, files)
 
     async def after_install(self, slug: str, *, enable: bool | None = None) -> None:
         if not enable:

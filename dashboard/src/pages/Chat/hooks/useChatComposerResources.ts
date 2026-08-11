@@ -1,35 +1,114 @@
 import { useCallback, useEffect, useState } from "react";
 import { connectorsApi } from "../../../api/modules/connectors";
 import { providerApi } from "../../../api/modules/provider";
+import { preferencesApi } from "../../../api/modules/preferences";
+import { octopThreadsApi } from "../../../api/modules/octopThreads";
 import { request } from "../../../api/request";
 import type { ResolvedModel } from "../../../api/types";
 import type { SkillSpec } from "../../Agent/Skills/useSkills";
 import { CONNECTORS_CHANGED_EVENT } from "../../Agent/Connectors/customMcpUtils";
 import { activeModelToRef } from "./useChatContextWindow";
 import {
+  hasSavedConnectors,
   loadSavedConnectors,
   loadSavedSkills,
   saveConnectors,
   saveSkills,
 } from "../utils/chatStorage";
+import { resolveInitialConnectors } from "../utils/resolveInitialConnectors";
 
 export function useChatComposerResources(
   resolvedAgentId: string | null | undefined,
   chatSkills: SkillSpec[],
-  activeAgentDefaultModel?: string | null,
+  activeThreadId?: string | null,
+  stickyModel?: string | null,
+  stickyReasoningMode?: "auto" | "enabled" | "disabled" | null,
+  stickyReasoningEffort?: string | null,
 ) {
   const [selectedConnectors, setSelectedConnectors] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [chatConnectors, setChatConnectors] = useState<
-    { mcp_server_name: string; label: string; kind: string }[]
+    {
+      mcp_server_name: string;
+      label: string;
+      kind: string;
+      default_open?: boolean;
+    }[]
   >([]);
   const [availableModels, setAvailableModels] = useState<ResolvedModel[]>([]);
   const [activeModelRef, setActiveModelRef] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [preferredModel, setPreferredModel] = useState<string | null>(null);
+  const [modelReasoning, setModelReasoning] = useState<
+    Record<
+      string,
+      { mode: "auto" | "enabled" | "disabled"; effort?: string | null }
+    >
+  >({});
+  const [reasoningMode, setReasoningMode] = useState<
+    "auto" | "enabled" | "disabled"
+  >("auto");
+  const [reasoningEffort, setReasoningEffort] = useState<string | null>(null);
+  const [conversationOverrides, setConversationOverrides] = useState<
+    Record<
+      string,
+      {
+        model: string | null;
+        mode: "auto" | "enabled" | "disabled";
+        effort: string | null;
+      }
+    >
+  >({});
+
+  // Auto = omit turn model; backend applies the expert default.
+  useEffect(() => {
+    const local = activeThreadId
+      ? conversationOverrides[activeThreadId]
+      : undefined;
+    setSelectedModel(
+      local ? local.model : stickyModel || preferredModel || null,
+    );
+  }, [
+    resolvedAgentId,
+    activeThreadId,
+    stickyModel,
+    preferredModel,
+    conversationOverrides,
+  ]);
 
   useEffect(() => {
-    setSelectedModel(activeAgentDefaultModel ?? null);
-  }, [resolvedAgentId, activeAgentDefaultModel]);
+    const defaults = selectedModel ? modelReasoning[selectedModel] : undefined;
+    const capability = availableModels.find(
+      (model) => `${model.provider_name}/${model.model}` === selectedModel,
+    )?.reasoning_config;
+    const local = activeThreadId
+      ? conversationOverrides[activeThreadId]
+      : undefined;
+    setReasoningMode(
+      local
+        ? local.mode
+        : stickyReasoningMode ||
+            defaults?.mode ||
+            capability?.default_mode ||
+            "auto",
+    );
+    setReasoningEffort(
+      local
+        ? local.effort
+        : stickyReasoningEffort ||
+            defaults?.effort ||
+            capability?.default_effort ||
+            null,
+    );
+  }, [
+    activeThreadId,
+    selectedModel,
+    stickyReasoningMode,
+    stickyReasoningEffort,
+    modelReasoning,
+    availableModels,
+    conversationOverrides,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,16 +121,24 @@ export function useChatComposerResources(
             mcp_server_name: i.mcp_server_name,
             label: i.display_name,
             kind: i.kind,
+            default_open: i.default_open === true,
           }));
         setChatConnectors(options);
         const allowed = new Set(options.map((o) => o.mcp_server_name));
-        setSelectedConnectors((prev) => {
-          const saved = resolvedAgentId
-            ? loadSavedConnectors(resolvedAgentId)
-            : [];
-          const base = prev.length > 0 ? prev : saved;
-          return base.filter((n) => allowed.has(n));
-        });
+        const defaults = options
+          .filter((o) => o.default_open)
+          .map((o) => o.mcp_server_name);
+        setSelectedConnectors((prev) =>
+          resolveInitialConnectors({
+            prev,
+            saved: resolvedAgentId ? loadSavedConnectors(resolvedAgentId) : [],
+            hasSaved: resolvedAgentId
+              ? hasSavedConnectors(resolvedAgentId)
+              : false,
+            defaults,
+            allowed,
+          }),
+        );
       });
     };
     loadConnectors();
@@ -82,14 +169,35 @@ export function useChatComposerResources(
 
   useEffect(() => {
     let cancelled = false;
-    void providerApi
-      .listResolvedModels()
-      .then((data) => {
-        if (!cancelled) setAvailableModels(data);
+    const loadModels = () => {
+      void providerApi
+        .listResolvedModels()
+        .then((data) => {
+          if (!cancelled) setAvailableModels(data);
+        })
+        .catch(() => {
+          if (!cancelled) setAvailableModels([]);
+        });
+    };
+    loadModels();
+    const onFocus = () => loadModels();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void preferencesApi
+      .get()
+      .then((preferences) => {
+        if (cancelled) return;
+        setPreferredModel(preferences.preferred_model || null);
+        setModelReasoning(preferences.model_reasoning || {});
       })
-      .catch(() => {
-        if (!cancelled) setAvailableModels([]);
-      });
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -133,9 +241,68 @@ export function useChatComposerResources(
     [resolvedAgentId],
   );
 
+  const handleModelChange = useCallback(
+    (model: string | null) => {
+      setSelectedModel(model);
+      const defaults = model ? modelReasoning[model] : undefined;
+      const capability = availableModels.find(
+        (item) => `${item.provider_name}/${item.model}` === model,
+      )?.reasoning_config;
+      const nextMode = defaults?.mode || capability?.default_mode || "auto";
+      const nextEffort = defaults?.effort || capability?.default_effort || null;
+      setReasoningMode(nextMode);
+      setReasoningEffort(nextEffort);
+      if (activeThreadId) {
+        setConversationOverrides((current) => ({
+          ...current,
+          [activeThreadId]: {
+            model,
+            mode: nextMode,
+            effort: nextEffort,
+          },
+        }));
+      }
+      if (resolvedAgentId && activeThreadId) {
+        void octopThreadsApi.patch(resolvedAgentId, activeThreadId, {
+          model_ref: model,
+          reasoning_mode: nextMode,
+          reasoning_effort: nextEffort,
+        });
+      }
+    },
+    [activeThreadId, availableModels, modelReasoning, resolvedAgentId],
+  );
+
+  const handleReasoningChange = useCallback(
+    (mode: "auto" | "enabled" | "disabled", effort: string | null) => {
+      setReasoningMode(mode);
+      setReasoningEffort(effort);
+      if (activeThreadId) {
+        setConversationOverrides((current) => ({
+          ...current,
+          [activeThreadId]: {
+            model: selectedModel,
+            mode,
+            effort,
+          },
+        }));
+      }
+      if (resolvedAgentId && activeThreadId) {
+        void octopThreadsApi.patch(resolvedAgentId, activeThreadId, {
+          reasoning_mode: mode,
+          reasoning_effort: effort,
+        });
+      }
+    },
+    [activeThreadId, resolvedAgentId, selectedModel],
+  );
+
   return {
     selectedModel,
-    setSelectedModel,
+    setSelectedModel: handleModelChange,
+    reasoningMode,
+    reasoningEffort,
+    handleReasoningChange,
     selectedConnectors,
     selectedSkills,
     chatConnectors,
