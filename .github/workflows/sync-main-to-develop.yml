@@ -50,6 +50,8 @@ jobs:
           TAG: ${{ github.event.release.tag_name || github.event.workflow_run.head_branch || 'manual' }}
         run: |
           set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           version="${TAG#v}"
           sync_branch="chore/sync-develop-after-${version}"
           git fetch origin main develop
@@ -77,7 +79,9 @@ jobs:
             git checkout -B "${sync_branch}"
             git push -u origin "${sync_branch}" --force
           else
-            git merge --abort
+            if [ -f .git/MERGE_HEAD ]; then
+              git merge --abort
+            fi
             echo "Merge conflict — rebuilding develop on main tip."
 
             git diff --name-only origin/main "${saved_develop}" > /tmp/diff_files.txt || true
