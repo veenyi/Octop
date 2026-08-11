@@ -13,10 +13,12 @@ from octop.infra.db.repos.audit import ACTOR_ADMIN
 from octop.infra.db.services import SharedServices
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.users.identity import Role, User
-from octop.infra.users.password import hash_password, verify_password
+from octop.infra.users.password import hash_password, validate_password_policy, verify_password
 from octop.infra.users.preferences import (
+    ModelReasoningPreference,
     RemoteBrowserBookmark,
     get_remote_browser_bookmarks_from_json,
+    merge_model_preferences_json,
     merge_preferences_json,
     validate_remote_browser_bookmarks,
 )
@@ -76,6 +78,7 @@ class UserManager:
         if not username:
             raise OctopError(ErrorCode.USERNAME_TAKEN, "username must not be empty")
         loc = normalize_locale(locale)
+        validate_password_policy(password)
         async with self._lock:
             if self._services.user_repo.get_by_username(username) is not None:
                 raise OctopError(
@@ -175,6 +178,7 @@ class UserManager:
         row = self._services.user_repo.get_by_username(username)
         if row is None or not verify_password(old, row.password_hash):
             raise OctopError(ErrorCode.AUTH_FAILED, "current password incorrect")
+        validate_password_policy(new, old_password=old)
         self._services.user_repo.set_password_hash(row.id, hash_password(new))
         self._services.user_repo.clear_login_lockout(row.id)
         self._services.audit_repo.write(
@@ -186,6 +190,7 @@ class UserManager:
         row = self._services.user_repo.get_by_username(username)
         if row is None:
             raise OctopError(ErrorCode.NOT_FOUND, "user not found")
+        validate_password_policy(new)
         self._services.user_repo.set_password_hash(row.id, hash_password(new))
         self._services.user_repo.clear_login_lockout(row.id)
         self._services.audit_repo.write(
@@ -247,6 +252,23 @@ class UserManager:
         merged = merge_preferences_json(row.preferences_json, bookmarks)
         self._services.user_repo.set_preferences_json(row.id, merged)
         return bookmarks
+
+    async def set_model_preferences(
+        self,
+        username: str,
+        *,
+        preferred_model: str | None | object = ...,
+        model_reasoning: dict[str, ModelReasoningPreference] | None = None,
+    ) -> None:
+        row = self._services.user_repo.get_by_username(username)
+        if row is None:
+            raise OctopError(ErrorCode.NOT_FOUND, "user not found")
+        merged = merge_model_preferences_json(
+            row.preferences_json,
+            preferred_model=preferred_model,
+            model_reasoning=model_reasoning,
+        )
+        self._services.user_repo.set_preferences_json(row.id, merged)
 
     async def disable(self, username: str) -> None:
         row = self._services.user_repo.get_by_username(username)

@@ -192,6 +192,7 @@ class Gateway:
         )
 
         self._channel_manager = ChannelManager(channels={})
+        self._channel_manager.set_pre_lock_handler(self._preempt_cancel_on_stop)
         await self._channel_manager.start()
 
         self._ws_channel = WebSocketChannel(
@@ -230,6 +231,32 @@ class Gateway:
             backend = media_backend_for_agent(self._agent_manager, row.agent_id)
             if backend is not None:
                 channel.set_media_backend(backend)
+
+    async def reload_channels_from_db(self) -> None:
+        """Drop and re-register enabled IM channels from the DB.
+
+        Used after backup restore so Gateway matches the replaced ``channels``
+        table without a process restart. Built-in dashboard/cli channels stay
+        registered. Call after agents have been rehydrated so media backends
+        can resolve.
+        """
+        if not self._channel_manager or not self._processor:
+            return
+
+        builtin = {WS_CHANNEL_ID, CLI_CHANNEL_ID}
+        live_ids = [cid for cid in self._channel_manager.channel_ids if cid not in builtin]
+        for channel_id in live_ids:
+            await self._unregister(channel_id)
+
+        for channel_id in list(self._runtime_status):
+            if channel_id not in builtin:
+                self._runtime_status.pop(channel_id, None)
+
+        rows = self._repos.channel_repo.list_all(include_disabled=False)
+        if rows:
+            await asyncio.gather(*(self._safe_register_channel(row) for row in rows))
+        await self.refresh_media_backends()
+        logger.info("Gateway channels reloaded from DB (%d enabled)", len(rows))
 
     async def shutdown(self) -> None:
         if self._channel_manager:
@@ -351,6 +378,21 @@ class Gateway:
             )
 
             servers = [s.strip() for s in (mcp_servers or []) if s and str(s).strip()]
+            # Empty job selection → follow default_open. Explicit picks win as-is.
+            if servers:
+                servers = (
+                    self._agent_manager.merge_turn_mcp_servers(
+                        session.user_id, servers, apply_defaults=False
+                    )
+                    or []
+                )
+            else:
+                servers = (
+                    self._agent_manager.merge_turn_mcp_servers(
+                        session.user_id, None, apply_defaults=True
+                    )
+                    or []
+                )
             if servers:
                 failed = await self._agent_manager.prepare_chat_mcp(
                     agent_id,
@@ -424,6 +466,38 @@ class Gateway:
         if self._channel_manager is None:
             raise RuntimeError("gateway not booted")
         return self._channel_manager
+
+    async def _preempt_cancel_on_stop(self, _channel_id: str, message: Any) -> None:
+        """Signal harness cancel for ``/stop`` / ``/cancel`` before the session lock.
+
+        Same-session IM turns are serialized by ChannelManager. Without this hook,
+        ``/stop`` waits behind the in-flight turn and never interrupts it.
+        """
+        from harness_agent.slash import parse_slash
+
+        from octop.infra.gateway.process.message_keys import session_key_from_message
+
+        text = getattr(message, "text", None)
+        cmd = parse_slash(text if isinstance(text, str) else None)
+        if cmd is None or cmd.name not in ("stop", "cancel"):
+            return
+
+        agent_id = getattr(message, "tenant_id", None) or ""
+        if not isinstance(agent_id, str) or not agent_id.strip():
+            return
+
+        session_key = session_key_from_message(message, agent_id=agent_id.strip())
+        thread_id = self._thread_registry.get_bound_thread_id(session_key)
+        if not thread_id:
+            return
+
+        self._agent_manager.cancel_stream(agent_id.strip(), thread_id)
+        logger.info(
+            "preempt cancel: agent=%s thread=%s cmd=/%s",
+            agent_id,
+            thread_id,
+            cmd.name,
+        )
 
     async def push_text(
         self,

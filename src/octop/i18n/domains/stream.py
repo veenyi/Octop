@@ -11,6 +11,7 @@ STREAM_STALL = f"{_PREFIX}stream_errors.stream_stall"
 RATE_LIMIT = f"{_PREFIX}stream_errors.rate_limit"
 AUTH = f"{_PREFIX}stream_errors.auth"
 CONTEXT_LENGTH = f"{_PREFIX}stream_errors.context_length"
+RECURSION_LIMIT = f"{_PREFIX}stream_errors.recursion_limit"
 TIMEOUT_NETWORK = f"{_PREFIX}stream_errors.timeout_network"
 PROVIDER_UNAVAILABLE = f"{_PREFIX}stream_errors.provider_unavailable"
 MODEL_CALL_FAILED = f"{_PREFIX}stream_errors.model_call_failed"
@@ -21,6 +22,7 @@ __all__ = [
     "MODEL_CALL_FAILED",
     "PROVIDER_UNAVAILABLE",
     "RATE_LIMIT",
+    "RECURSION_LIMIT",
     "STREAM_STALL",
     "TIMEOUT_NETWORK",
     "classify_stream_error_message",
@@ -87,6 +89,16 @@ def classify_stream_error_message(message: str) -> str | None:
         return CONTEXT_LENGTH
 
     if (
+        "graph_recursion_limit" in lower
+        or "graphrecursionerror" in compact
+        or "recursion limit of" in lower
+        or (
+            "recursion_limit" in lower and ("reached" in lower or "without hitting a stop" in lower)
+        )
+    ):
+        return RECURSION_LIMIT
+
+    if (
         "internalservererror" in compact
         or "bad gateway" in lower
         or "service unavailable" in lower
@@ -126,9 +138,9 @@ def stream_error_message(error: str | None, locale: str | Locale = "en") -> str:
 
 
 def format_stream_error(exc: BaseException | str, locale: str | Locale = "en") -> str:
-    """Classify an exception or raw message; fall back to a short raw string."""
+    """Classify an exception or raw message; fall back to a generic localized message."""
     message = str(exc) if isinstance(exc, BaseException) else exc
     classified = classify_stream_error_message(message)
     if classified is not None:
         return tr(classified.removeprefix(_PREFIX), locale)
-    return message[:500]
+    return tr(MODEL_CALL_FAILED.removeprefix(_PREFIX), locale)

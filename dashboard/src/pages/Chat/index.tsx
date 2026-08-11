@@ -13,6 +13,7 @@ import { Tooltip } from "antd";
 import { message as antMessage } from "@/utils/antdMessage";
 
 import { useIsMobile } from "../../hooks/useIsMobile";
+import { useUserRole } from "../../hooks/useUserRole";
 import { useChat } from "./hooks/useChat";
 import { useSessions } from "./hooks/useSessions";
 import * as chatStore from "./hooks/chatStore";
@@ -72,6 +73,8 @@ function ChatPageInner() {
     threadId?: string;
   }>();
   const isMobile = useIsMobile();
+  const role = useUserRole();
+  const isAdmin = role === "admin";
   const chatHistoryRail = useChatHistoryRail();
   const [selectedTargetAgents, setSelectedTargetAgents] = useState<string[]>(
     [],
@@ -276,6 +279,11 @@ function ChatPageInner() {
     return dedupeDockFilePaths([...filePaths, ...fromTabs], resolvedAgentId);
   }, [filePaths, openTabs, resolvedAgentId]);
 
+  const composerSession = useMemo(
+    () => sessions.find((session) => session.id === activeThreadId) ?? null,
+    [sessions, activeThreadId],
+  );
+
   const {
     selectedModel,
     setSelectedModel,
@@ -284,12 +292,18 @@ function ChatPageInner() {
     chatConnectors,
     availableModels,
     activeModelRef,
+    reasoningMode,
+    reasoningEffort,
+    handleReasoningChange,
     handleConnectorsChange,
     handleSkillsChange,
   } = useChatComposerResources(
     resolvedAgentId,
     chatSkills,
-    activeAgent?.default_model,
+    activeThreadId,
+    composerSession?.modelRef,
+    composerSession?.reasoningMode,
+    composerSession?.reasoningEffort,
   );
 
   const { contextMaxTokens, contextUsedTokens } = useChatContextWindow(
@@ -299,6 +313,7 @@ function ChatPageInner() {
     availableModels,
     activeAgent?.default_model,
     activeModelRef,
+    activeAgent,
   );
 
   const sessionUsage = useMemo(() => {
@@ -371,6 +386,8 @@ function ChatPageInner() {
     selectedConnectors,
     selectedSkills,
     selectedTargetAgents,
+    reasoningMode,
+    reasoningEffort,
     defaultModel: activeAgent?.default_model ?? null,
     sendMessage,
     createSession,
@@ -768,22 +785,24 @@ function ChatPageInner() {
                   </span>
                 </Tooltip>
               )}
-              <Tooltip
-                title={t("chat.openTerminal", "打开终端")}
-                mouseEnterDelay={0.35}
-                placement="left"
-              >
-                <span className={styles.chatFloatBtnWrap}>
-                  <button
-                    type="button"
-                    className={styles.terminalFloatBtn}
-                    onClick={toggleTerminalPanel}
-                    aria-label={t("chat.openTerminal", "打开终端")}
-                  >
-                    <Terminal size={20} strokeWidth={2.1} />
-                  </button>
-                </span>
-              </Tooltip>
+              {isAdmin && (
+                <Tooltip
+                  title={t("chat.openTerminal", "打开终端")}
+                  mouseEnterDelay={0.35}
+                  placement="left"
+                >
+                  <span className={styles.chatFloatBtnWrap}>
+                    <button
+                      type="button"
+                      className={styles.terminalFloatBtn}
+                      onClick={toggleTerminalPanel}
+                      aria-label={t("chat.openTerminal", "打开终端")}
+                    >
+                      <Terminal size={20} strokeWidth={2.1} />
+                    </button>
+                  </span>
+                </Tooltip>
+              )}
               <Tooltip
                 title={
                   browserSessionId
@@ -851,6 +870,9 @@ function ChatPageInner() {
             availableModels={availableModels}
             selectedModel={selectedModel}
             onModelChange={setSelectedModel}
+            reasoningMode={reasoningMode}
+            reasoningEffort={reasoningEffort}
+            onReasoningChange={handleReasoningChange}
             availableConnectors={chatConnectors}
             selectedConnectors={selectedConnectors}
             onConnectorsChange={handleConnectorsChange}
