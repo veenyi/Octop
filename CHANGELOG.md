@@ -6,6 +6,20 @@
 
 ## [Unreleased]
 
+## [0.9.22] - 2026-08-11
+
+### 新增
+- 专家工作区支持 `.docx` 在线编辑：以 Markdown 在 Monaco 中打开/保存，保存时转回 docx 覆盖原文件（标题/加粗/斜体/列表/表格保留，复杂格式简化）；工作区新建的 `.docx` 即初始化为合法文档包，预览/编辑立即可用。基于可扩展注册表，新增可编辑后缀只需注册一个后端转换器类 + 前端注册表一行
+
+### 变更
+- 依赖新增 `python-docx==1.2.0`（含 `lxml`），用于工作区 `.docx` 的 Markdown 往返转换
+
+### 修复
+- 仪表盘发版后或长时间未打开时白屏：Service Worker 不再 Cache-First 钉死旧 `index.html`；hashed 资源改为 CacheFirst；入口脚本失败时清除 SW 缓存并自动刷新一次 (#236)
+
+### 安全
+- 仪表盘 SPA 静态回退路由加固：在拼接路径前显式拒绝绝对路径与 `..` 父目录引用，并保留最终 `relative_to` 校验，杜绝路径穿越读取 dashboard 目录之外的文件（修复 CodeQL 标记的 Uncontrolled data used in path expression）
+
 ## [0.9.21] - 2026-08-11
 
 ### 新增
