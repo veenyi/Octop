@@ -7,6 +7,7 @@ import MainLayout from "./layouts/MainLayout";
 import LoginPage from "./pages/Login";
 import OidcComplete from "./pages/Login/OidcComplete";
 import SetupPage from "./pages/Setup";
+import InvitePage from "./pages/Invite";
 import AuthGuard from "./components/AuthGuard";
 import { AntdAppProvider } from "./components/AntdAppProvider";
 import GlobalErrorBoundary from "./components/ErrorBoundary";
@@ -15,7 +16,7 @@ import { AgentProvider } from "./context/AgentContext";
 import { VoiceOutputProvider } from "./context/VoiceOutputContext";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { useUnauthorizedRedirect } from "./hooks/useUnauthorizedRedirect";
-import { ANTD_BRAND_TOKENS } from "./styles/themePalettes";
+import { brandTokensFor } from "./styles/themePalettes";
 import "./styles/theme-vars.css";
 import "./styles/layout.css";
 import "./styles/form-override.css";
@@ -28,10 +29,10 @@ const GlobalStyle = createGlobalStyle`
 `;
 
 function ThemedApp() {
-  const { isDark, palette } = useTheme();
+  const { isDark, palette, customColor } = useTheme();
   const { t } = useTranslation();
   const isMobile = useIsMobile();
-  const brandTokens = ANTD_BRAND_TOKENS[palette][isDark ? "dark" : "light"];
+  const brandTokens = brandTokensFor(palette, isDark, customColor);
 
   useUnauthorizedRedirect();
 
@@ -102,6 +103,7 @@ function ThemedApp() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/login/oidc/complete" element={<OidcComplete />} />
           <Route path="/setup" element={<SetupPage />} />
+          <Route path="/invite" element={<InvitePage />} />
           <Route
             path="/*"
             element={
