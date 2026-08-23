@@ -2154,6 +2154,16 @@ class AgentManager:
             )
         )
 
+        mobile_tools: list[Any] = []
+        if self._config.capabilities.mobile.enabled:
+            from octop.infra.mobile.tools import build_mobile_tools  # noqa: PLC0415
+
+            mobile_tools = build_mobile_tools(
+                self._config,
+                user_repo=self._repos.user_repo,
+                paths=self.paths,
+            )
+
         from harness_agent.plugins import PluginRegistry, build_plugin_tools  # noqa: PLC0415
 
         agent_plugins = cfg.get("plugins") if isinstance(cfg.get("plugins"), dict) else {}
@@ -2175,7 +2185,10 @@ class AgentManager:
 
         sanitize_plugin_tool_names(
             plugin_tools,
-            reserved={str(getattr(t, "name", "")) for t in [*(cron_tools or []), *knowledge_tools]},
+            reserved={
+                str(getattr(t, "name", ""))
+                for t in [*(cron_tools or []), *knowledge_tools, *mobile_tools]
+            },
         )
         self._plugin_tool_labels[row.agent_id] = {
             str(getattr(tool, "name", "")): label
@@ -2215,6 +2228,7 @@ class AgentManager:
         if cron_tools:
             merged_tools.extend(cron_tools)
         merged_tools.extend(knowledge_tools)
+        merged_tools.extend(mobile_tools)
         merged_tools.extend(plugin_tools)
         if self._harness_manager is not None:
             merged_tools.extend(self._harness_manager.team.team_tools())

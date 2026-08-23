@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Spin } from "antd";
-import { getAuthToken } from "../api/request";
+import { clearAuthToken, getAuthToken } from "../api/request";
 import { authApi, type OctopUser } from "../api/modules/auth";
 import { applyUserLocale } from "../utils/locale";
 import { CurrentUserProvider } from "../hooks/useCurrentUser";
@@ -10,36 +10,24 @@ interface AuthGuardProps {
   children: React.ReactNode;
 }
 
-function inviteRedirectTarget(searchParams: URLSearchParams): string | null {
-  const invite = (
-    searchParams.get("invite") ||
-    searchParams.get("code") ||
-    ""
-  ).trim();
-  if (!invite) return null;
-  return `/invite?code=${encodeURIComponent(invite)}`;
-}
-
 /**
  * Gate every protected route on (a) the initial admin existing and
  * (b) a valid JWT in localStorage. Octop always requires auth — there is
  * no "password protection disabled" mode like finnie had.
  *
- * Auth is checked once on mount (not on every pathname change). When a JWT
- * is already present we render the shell immediately and validate in the
- * background — a full-page Spin on every hard refresh feels like the app
- * is "reloading" even though routing did not change.
+ * Always wait for ``/api/setup/status`` (and ``/auth/me`` when a token
+ * exists) before mounting children. Optimistic shell render with a stale
+ * token would fire ``/api/agents`` / capabilities / update probes and get
+ * 503'd by setup lockdown on first boot.
  *
  * When unauthenticated we must NOT render children: MainLayout / AgentProvider
  * would fire authenticated APIs, trip the 401 interceptor, and race the
- * invite redirect back to ``/login``.
+ * navigate back to ``/login``.
  */
 export default function AuthGuard({ children }: AuthGuardProps) {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const hadToken = Boolean(getAuthToken());
-  const [checking, setChecking] = useState(!hadToken);
-  const [authed, setAuthed] = useState(hadToken);
+  const [checking, setChecking] = useState(true);
+  const [authed, setAuthed] = useState(false);
   const [user, setUser] = useState<OctopUser | null>(null);
 
   useEffect(() => {
@@ -49,8 +37,10 @@ export default function AuthGuard({ children }: AuthGuardProps) {
       try {
         const status = await authApi.getAuthStatus();
 
-        // No admin yet → push to setup wizard.
+        // No admin yet → push to setup wizard; drop any leftover JWT from a
+        // previous install so background prefetch cannot stampede lockdown.
         if (status.setup_required) {
+          clearAuthToken();
           if (!cancelled) navigate("/setup", { replace: true });
           return;
         }
@@ -62,8 +52,7 @@ export default function AuthGuard({ children }: AuthGuardProps) {
             setAuthed(false);
             // Stay on the spinner until navigation away completes — do not
             // flip ``checking`` off or children would mount and 401→/login.
-            const inviteTo = inviteRedirectTarget(searchParams);
-            navigate(inviteTo ?? "/login", { replace: true });
+            navigate("/login", { replace: true });
           }
           return;
         }
@@ -99,7 +88,7 @@ export default function AuthGuard({ children }: AuthGuardProps) {
     return () => {
       cancelled = true;
     };
-  }, [navigate, searchParams]);
+  }, [navigate]);
 
   if (checking || !authed) {
     return (

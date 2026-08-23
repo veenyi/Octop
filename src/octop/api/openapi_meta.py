@@ -140,6 +140,10 @@ OPENAPI_TAGS: list[dict[str, str]] = [
         "description": "Remote browser sessions: navigate, screenshot, live stream.",
     },
     {
+        "name": "mobile",
+        "description": "Remote Phone stream and adb control (mobile permission).",
+    },
+    {
         "name": "desktop",
         "description": "Remote OS desktop stream and input injection (admin only).",
     },

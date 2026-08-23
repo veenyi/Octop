@@ -5,7 +5,7 @@ import { message } from "@/utils/antdMessage";
 
 import { Lock, User } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { setAuthToken } from "../../api";
+import { clearAuthToken, setAuthToken } from "../../api";
 import { authApi, type OidcStatus } from "../../api/modules/auth";
 import { apiErrorMessage } from "../../utils/apiError";
 import { refreshServerLabels } from "../../i18n";
@@ -31,24 +31,6 @@ export default function LoginPage() {
     void applyGuestLocale();
   }, []);
 
-  // Invite links that bounced onto /login (e.g. race before AuthGuard fix)
-  // should continue the invite wizard instead of the password form.
-  useEffect(() => {
-    const invite = (
-      searchParams.get("invite") ||
-      searchParams.get("code") ||
-      ""
-    ).trim();
-    if (!invite) return;
-    // OIDC error uses ``code`` as an error key — don't hijack that.
-    if (searchParams.get("oidc_error")) return;
-    if (searchParams.has("code") && !searchParams.has("invite")) {
-      // Bare ``?code=`` on /login is ambiguous; only trust ``invite``.
-      return;
-    }
-    navigate(`/invite?code=${encodeURIComponent(invite)}`, { replace: true });
-  }, [navigate, searchParams]);
-
   useEffect(() => {
     let cancelled = false;
     authApi
@@ -56,8 +38,17 @@ export default function LoginPage() {
       .then((status) => {
         if (cancelled) return;
         if (status.setup_required) {
+          clearAuthToken();
           navigate("/setup", { replace: true });
+          return;
         }
+        // Only probe OIDC after setup is done — otherwise lockdown 503s.
+        authApi
+          .getOidcStatus()
+          .then((next) => {
+            if (!cancelled) setOidc(next);
+          })
+          .catch(() => {});
       })
       .catch(() => {
         // Backend unreachable — let the user attempt login and show a real
@@ -68,13 +59,6 @@ export default function LoginPage() {
       cancelled = true;
     };
   }, [navigate]);
-
-  useEffect(() => {
-    authApi
-      .getOidcStatus()
-      .then(setOidc)
-      .catch(() => {});
-  }, []);
 
   useEffect(() => {
     const code = searchParams.get("oidc_error");
