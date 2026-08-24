@@ -2,3 +2,19 @@
 # sync 工作流中止。用 union 合并驱动让「末尾追加」类冲突自动保留双方内容，
 # 无需人工合入。其它类型冲突仍按默认 3-way 处理。
 .gitignore merge=union
+
+# 整合版（main）专属功能文件：上传放开（500MB/任意类型）、中文分类扩展、
+# 中文 subagent 库等。上游更新这些文件时，冲突由 sync 工作流配置的
+# merge=keep-ours driver 自动保留整合版实现，保证 main 同步永不因冲突中止。
+# 如需吸收上游对这些文件的新改动，请人工合并（参考一次性的三方合并流程）。
+# 注意：这些规则只存在于 main 分支的 .gitattributes，vanilla（原版）不受影响。
+dashboard/src/pages/Chat/hooks/useChatAttachments.ts merge=keep-ours
+dashboard/src/pages/Chat/utils/chatAttachments.ts merge=keep-ours
+dashboard/src/pages/Settings/Models/components/modals/CustomProviderModal.tsx merge=keep-ours
+dashboard/src/locales/en.json merge=keep-ours
+dashboard/src/locales/zh.json merge=keep-ours
+src/octop/api/common/attachments.py merge=keep-ours
+src/octop/infra/agents/subagents/library/zh/divisions.json merge=keep-ours
+src/octop/infra/gateway/media/inbound_store.py merge=keep-ours
+tests/integration/test_subagents_api.py merge=keep-ours
+tests/unit/agents/test_subagent_catalog.py merge=keep-ours

@@ -6,14 +6,17 @@ name: Sync upstream Octop
 #
 # 两个分支各自独立合并上游 main 后分别推送；推送会各自触发对应的构建工作流
 # （main 触发 zz-build-fpk.yml，vanilla 触发 zz-build-fpk-vanilla.yml），
-# 完成双环境（Docker + 本地版）的重新打包与发布。无需在此显式 gh workflow run，
-# 否则会与 push 触发的构建重复（靠 concurrency 排队还可能产生重复 release）。
+# 完成双环境（Docker + 本地版）的重新打包与发布。
 #
-# 「.gitignore 末尾追加」类冲突通过仓库根目录 .gitattributes 的
-#   `.gitignore merge=union`
-# 全自动合并，无需人工介入。其它无法自动解决的冲突会中止本次同步、下次重试。
+# 整合版（main）合并策略：
+#   - .gitattributes 中声明的整合版专属文件（上传放开 / 中文分类扩展等）
+#     通过 merge=keep-ours driver 在冲突时自动保留整合版实现；
+#   - 其余文件正常 3-way 合并，吸收上游新功能；
+#   - 仍无法自动解决的冲突：保留本地（整合版）版本并记录文件清单，
+#     保证 main 同步永不因冲突中止（此前静默 exit 0 曾导致整合版停更 8 天）。
 #
-# 定时每 6 小时检查一次，也可在 Actions 页面手动触发（workflow_dispatch）。
+# vanilla（原版）合并策略：
+#   - 正常 3-way；出现无法自动解决的冲突则中止并以失败状态退出（失败可见）。
 
 on:
   schedule:
@@ -45,12 +48,18 @@ jobs:
         with:
           ref: ${{ matrix.branch }}
           fetch-depth: 0
+          fetch-tags: true
           token: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Git identity
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # 整合版专属文件的合并驱动：冲突时保留本地版本。必须早于 merge 执行。
+      - name: Configure merge drivers
+        run: |
+          git config merge.keep-ours.driver true
 
       - name: Sync from TencentCloud/Octop
         id: sync
@@ -65,19 +74,32 @@ jobs:
           # 用 FETCH_HEAD 可靠引用上游 main，避免 remote-tracking ref 未创建导致 merge 失败。
           git fetch upstream main
 
-          if ! git merge FETCH_HEAD --no-edit; then
-            echo "合并出现无法自动解决的冲突，已中止本次 ${{ matrix.branch }} 同步（下次重试）。"
-            git merge --abort || true
-            echo "synced=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          AFTER=$(git rev-parse HEAD)
-          if [ "$BEFORE" != "$AFTER" ]; then
-            git push origin ${{ matrix.branch }}
-            echo "synced=true" >> "$GITHUB_OUTPUT"
-            echo "✅ 已同步上游更新并推送到 ${{ matrix.branch }}（将自动触发该分支的构建工作流）。"
+          if git merge FETCH_HEAD --no-edit; then
+            AFTER=$(git rev-parse HEAD)
+            if [ "$BEFORE" != "$AFTER" ]; then
+              git push origin ${{ matrix.branch }}
+              echo "synced=true" >> "$GITHUB_OUTPUT"
+              echo "✅ 已同步上游更新并推送到 ${{ matrix.branch }}（将自动触发构建工作流）。"
+            else
+              echo "synced=false" >> "$GITHUB_OUTPUT"
+              echo "✅ ${{ matrix.branch }} 已是最新，无需推送。"
+            fi
           else
-            echo "synced=false" >> "$GITHUB_OUTPUT"
-            echo "✅ ${{ matrix.branch }} 已是最新，无需推送。"
+            if [ "${{ matrix.branch }}" = "main" ]; then
+              # 整合版：剩余冲突一律保留本地（整合版）实现，保证同步永不中止。
+              echo "⚠️ 整合版存在无法自动解决的冲突，已按本地（整合版）版本处理："
+              git diff --name-only --diff-filter=U | tee /tmp/conflicts.txt | sed 's/^/    /'
+              git diff --name-only --diff-filter=U | xargs -r -I{} git checkout --ours -- "{}"
+              git add -A
+              git commit --no-edit
+              git push origin main
+              echo "synced=true" >> "$GITHUB_OUTPUT"
+              echo "✅ 已用本地版本解决冲突并推送到 main。"
+              echo "   建议人工审查（本次保留整合版实现的文件数）：$(wc -l < /tmp/conflicts.txt)"
+            else
+              echo "❌ vanilla 同步出现无法自动解决的冲突，已中止。请人工处理。"
+              git merge --abort || true
+              echo "synced=false" >> "$GITHUB_OUTPUT"
+              exit 1
+            fi
           fi
