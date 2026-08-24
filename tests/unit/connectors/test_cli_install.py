@@ -96,6 +96,8 @@ def test_install_degrades_to_user_prefix_when_global_not_writable(
     state = {"installed": False}
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(home))
+    # Windows 上 os.path.expanduser("~") 读 USERPROFILE，需一并覆盖以跨平台
+    monkeypatch.setenv("USERPROFILE", str(home))
 
     def _which(name: str) -> str | None:
         if name == "npm":
@@ -146,6 +148,8 @@ def test_ensure_cli_path_injects_user_bin(monkeypatch: pytest.MonkeyPatch, tmp_p
 
     _os.makedirs(bin_dir, exist_ok=True)
     monkeypatch.setenv("HOME", str(home))
+    # Windows 上 os.path.expanduser("~") 读 USERPROFILE，需一并覆盖以跨平台
+    monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setitem(cli_install.os.environ, "PATH", "/usr/bin")
     out = cli_install.ensure_cli_path()
     assert out == bin_dir
