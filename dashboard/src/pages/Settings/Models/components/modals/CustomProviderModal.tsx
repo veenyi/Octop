@@ -101,8 +101,6 @@ export function CustomProviderModal({
         return;
       }
       const apiKey = (values.api_key as string | undefined)?.trim();
-      const baseUrl = (values.base_url as string | undefined)?.trim() || null;
-
       if (!apiKey) {
         message.warning(t("models.pleaseEnterApiKey"));
         return;
@@ -111,7 +109,7 @@ export function CustomProviderModal({
       const result = await fetchProviderModels({
         kind: "openai",
         api_key: apiKey,
-        base_url: baseUrl,
+        base_url: (values.base_url as string | undefined)?.trim() || null,
       });
       if (!result.ok) {
         message.error(
