@@ -89,9 +89,14 @@ jobs:
               # 整合版：剩余冲突一律保留本地（整合版）实现，保证同步永不中止。
               echo "⚠️ 整合版存在无法自动解决的冲突，已按本地（整合版）版本处理："
               git diff --name-only --diff-filter=U | tee /tmp/conflicts.txt | sed 's/^/    /'
-              git diff --name-only --diff-filter=U | xargs -r -I{} git checkout --ours -- "{}"
+              # 逐文件解决（不用 xargs，避免个别文件失败导致整步退出码 123）：
+              # checkout --ours 失败时用 git show 取 ours 内容兜底，再 add 清除 unmerged 标记。
+              while IFS= read -r f; do
+                git checkout --ours -- "$f" 2>/dev/null || git show ":2:$f" > "$f"
+                git add -- "$f"
+              done < <(git diff --name-only --diff-filter=U)
               git add -A
-              git commit --no-edit
+              git commit --no-edit || git commit --no-edit --allow-empty
               git push origin main
               echo "synced=true" >> "$GITHUB_OUTPUT"
               echo "✅ 已用本地版本解决冲突并推送到 main。"
