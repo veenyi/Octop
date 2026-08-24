@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import shutil
@@ -152,10 +153,8 @@ def install_connector_cli(kind: str) -> dict[str, Any]:
     install_args = [npm, "install", "-g"]
     if not _prefix_writable(prefix):
         user_prefix, _user_bin = _user_npm_prefix()
-        try:
+        with contextlib.suppress(OSError):
             os.makedirs(user_prefix, exist_ok=True)
-        except OSError:
-            pass
         install_args += ["--prefix", user_prefix]
 
     try:
