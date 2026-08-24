@@ -59,6 +59,7 @@ def test_install_runs_npm(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> Non
         del kwargs
         calls.append(list(argv))
         if argv[1:3] == ["config", "get"]:
+
             class _Cfg:
                 returncode = 0
                 stdout = str(tmp_path)
@@ -107,6 +108,7 @@ def test_install_degrades_to_user_prefix_when_global_not_writable(
         del kwargs
         calls.append(list(argv))
         if argv[1:3] == ["config", "get"]:
+
             class _Cfg:
                 returncode = 0
                 stdout = "/usr/local"
