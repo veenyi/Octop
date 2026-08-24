@@ -92,6 +92,10 @@ logs/
 # Local monorepo dev helpers (not for upstream)
 scripts/dev-local-link.sh
 
+# Local downloaded platform-tools for mobile DinD testing
+.tools/
+.tools-sdk/
+
 # Local agent planning docs (not for upstream)
 docs/superpowers/
 
