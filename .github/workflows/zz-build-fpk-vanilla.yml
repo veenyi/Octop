@@ -280,25 +280,37 @@ jobs:
           VER="${{ needs.version.outputs.version }}"
           ITER="${{ needs.version.outputs.iter }}"
           TAG="fnos-vanilla-${VER}-${ITER}"
-          # 找上一个固定版本 tag（排除 fnos-vanilla-latest）
-          PREV_TAG=$(git describe --tags --match "fnos-vanilla-[0-9]*" --exclude "fnos-vanilla-latest" --abbrev=0 HEAD^ 2>/dev/null || true)
-          if [ -z "$PREV_TAG" ]; then
-            PREV_TAG=$(git rev-list --max-parents=0 HEAD)
-          fi
+          # 找本分支历史中可达的最近固定版本 tag（排除滚动 tag）。
+          # 不能直接 git describe：若历史 tag 误指向其它分支（如 main）的 commit，
+          # describe 会失败并回退到仓库根，导致更新说明把整个历史都列出来。
+          PREV_TAG=""
+          for t in $(git tag --list "fnos-vanilla-*" --sort=-creatordate); do
+            [ "$t" = "fnos-vanilla-latest" ] && continue
+            if git merge-base --is-ancestor "$t" HEAD 2>/dev/null; then
+              PREV_TAG="$t"
+              break
+            fi
+          done
           echo "prev_tag=$PREV_TAG" >> "$GITHUB_OUTPUT"
           {
-            echo "## 本次更新（v${VER}-${ITER}）"
-            echo ""
-            git log --pretty=format:"- %s" "$PREV_TAG"..HEAD || true
-            echo ""
-            echo ""
+            # 安装说明置顶，用户一眼看到下载文件
             echo "## 安装说明"
+            echo ""
             echo "1. 飞牛应用中心 → 设置 → 手动安装应用，选择对应 .fpk。"
             echo "2. Docker 版 **Fnos-octop-vanilla-${VER}-${ITER}.fpk**（约 80KB）：飞牛自动从 GHCR 拉取镜像运行，镜像为 \\"ghcr.io/veenyi/octop:vanilla\\"。"
             echo "3. 本地版 **Fnos-octop-vanilla-native-${VER}-${ITER}.fpk**（约 200MB）：非 Docker，原生运行在飞牛主机；安装时自动关联系统 Python 3.12 开发工具；浏览器、远程桌面等附加组件在 Octop 应用内按需安装。"
             echo ""
             echo "---"
             echo "固定版本请从本 Release 附件下载；最新滚动版见 [fnos-vanilla-latest](https://github.com/${{ github.repository }}/releases/tag/fnos-vanilla-latest)。"
+            echo ""
+            echo "## 本次更新（v${VER}-${ITER}）"
+            echo ""
+            # 只列相对上一版的非 merge commit，最多 30 条，避免说明冗长
+            if [ -n "$PREV_TAG" ]; then
+              git log --oneline --no-merges "$PREV_TAG"..HEAD | head -30
+            else
+              git log --oneline --no-merges -30 HEAD
+            fi
           } > /tmp/release-body.md
           cat /tmp/release-body.md
 
