@@ -16,5 +16,6 @@ dashboard/src/locales/zh.json merge=keep-ours
 src/octop/api/common/attachments.py merge=keep-ours
 src/octop/infra/agents/subagents/library/zh/divisions.json merge=keep-ours
 src/octop/infra/gateway/media/inbound_store.py merge=keep-ours
+src/octop/infra/connectors/gateway/cli_install.py merge=keep-ours
 tests/integration/test_subagents_api.py merge=keep-ours
 tests/unit/agents/test_subagent_catalog.py merge=keep-ours
