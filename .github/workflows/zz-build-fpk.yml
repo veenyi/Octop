@@ -307,6 +307,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.version.outputs.tag }}
+          # 显式指向构建所用 commit，避免 GitHub 默认指向 main 分支 HEAD
+          target_commitish: ${{ github.sha }}
           name: Octop (FnOS) v${{ needs.version.outputs.pkg_ver }}
           body_path: /tmp/release-body.md
           files: dist/*.fpk
@@ -335,6 +337,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: fnos-latest
+          target_commitish: ${{ github.sha }}
           name: Octop (FnOS) latest
           body_path: /tmp/release-body.md
           files: dist/*.fpk
