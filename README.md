@@ -135,6 +135,12 @@ Here are our mid-to-long term plans:
 
 This roadmap may shift as the community grows; treat it as indicative only.
 
+
+## 🖥️ FnOS (飞牛 NAS) Installation
+
+Octop can be installed on FnOS (飞牛 NAS) devices via the App Center as a `.fpk` package, either as a Docker-backed app or as a native (non-Docker) app. See [`fnos/README.md`](fnos/README.md) for the packaging guide, the FPK build helper (`scripts/build-fpk.sh`), and the CI pipeline template (`.github/workflows/fnos-build-fpk.yml`).
+
+Initial admin credentials: `admin` / `Octop123` (change after first login). For non-root FnOS installs, the WeCom/Feishu connector CLIs require the user-level npm fallback fix (PR #406).
 ## 🚀 Quick Start
 
 ### Prerequisites
