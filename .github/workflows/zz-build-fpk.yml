@@ -211,6 +211,14 @@ jobs:
               -c "from octop.launch import run_foreground_blocking; import mcp, langchain_mcp_adapters; print('octop', octop.__version__, '| mcp', mcp.__version__, '| lcma', langchain_mcp_adapters.__version__)"
           } 2>&1 | tee -a "$LOG"
 
+      # harness-gateway QQ 通道修复（token 刷新/被动回复预算/主动补发等）：
+      # harness-gateway 官方仓库私有无法 PR，这里在打包时对 site-packages
+      # 应用幂等补丁，保证升级/重装后修复不丢失。
+      - name: Patch harness_gateway QQ fixes
+        run: |
+          python3 "${{ github.workspace }}/scripts/patch_harness_gateway.py" \
+            "${{ github.workspace }}/fnos-native/app/site-packages"
+
       - name: Build native FPK
         id: build_native
         env:
