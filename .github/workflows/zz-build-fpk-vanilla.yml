@@ -219,6 +219,15 @@ jobs:
           python3 "${{ github.workspace }}/scripts/patch_harness_gateway.py" \
             "${{ github.workspace }}/fnos-native/app/site-packages"
 
+      # FPK 自升级守卫：FPK 部署下禁止内置在线升级（octop update / 面板
+      # 「立即升级」），运行时从打包 site-packages 加载，在线安装无法生效；
+      # 升级须通过飞牛应用中心装新版 FPK。launcher/compose 设
+      # OCTOP_INSTALL_MODE=fpk-*，本补丁让 run_upgrade 短路并给出引导。
+      - name: Patch FPK self-update guard
+        run: |
+          python3 "${{ github.workspace }}/scripts/patch_fpk_selfupdate.py" \
+            "${{ github.workspace }}/fnos-native/app/site-packages"
+
       - name: Build native FPK
         id: build_native
         env:

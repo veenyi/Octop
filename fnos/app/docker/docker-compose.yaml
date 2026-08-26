@@ -13,6 +13,9 @@ services:
       - OCTOP_BIND_HOST=0.0.0.0
       - OCTOP_PORT=${OCTOP_PORT:-8088}
       - OCTOP_LOG_LEVEL=${OCTOP_LOG_LEVEL:-info}
+      # 飞牛 FPK 部署标识：禁止容器内在线升级（octop update / 面板「立即升级」），
+      # 升级请通过飞牛应用中心更新 FPK（应用中心会重新拉取镜像）。
+      - OCTOP_INSTALL_MODE=fpk-docker
       - OCTOP_DEFAULT_PASSWORD=${OCTOP_DEFAULT_PASSWORD:-Octop123}
       - OCTOP_ADMIN_USERNAME=${OCTOP_ADMIN_USERNAME:-admin}
       - OCTOP_ADMIN_DISPLAY_NAME=${OCTOP_ADMIN_DISPLAY_NAME:-Admin}
