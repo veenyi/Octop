@@ -59,6 +59,7 @@ async def save_attachment(
     filename: str,
     media_type: str,
     data: bytes,
+    max_bytes: int | None = None,
 ) -> StoredAttachment:
     del owner_id  # access control is JWT + agent scope at download time
     inbound = await write_inbound(
@@ -66,5 +67,6 @@ async def save_attachment(
         data,
         filename=filename,
         media_type=media_type,
+        max_bytes=max_bytes,
     )
     return _stored_from_inbound(inbound)
