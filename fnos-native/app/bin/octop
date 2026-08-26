@@ -34,6 +34,9 @@ fi
 export HOME="$DATA_DIR"
 export OCTOP_HOME="${DATA_DIR}/.octop"
 export OCTOP_DATA_DIR="$DATA_DIR"
+# 飞牛 FPK 部署标识：禁止内置在线升级（octop update / 面板「立即升级」），
+# 升级须通过飞牛应用中心安装新版 FPK（见 scripts/patch_fpk_selfupdate.py）。
+export OCTOP_INSTALL_MODE="fpk-native"
 
 # 查找飞牛系统上的 Python 3.12（优先应用商店安装路径，再 PATH）
 
