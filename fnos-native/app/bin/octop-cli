@@ -21,7 +21,8 @@ set -euo pipefail
 
 # 共享函数库（find_python312 / fix_ownership_and_perms / free_octop_ports）
 # 打包时由 scripts/build-fpk.sh 注入；仓库内运行无此文件时跳过（函数缺失时再报错）。
-_OCTOP_COMMON=""$(dirname "$0")/../cmd/common.sh""
+_OCTOP_COMMON="$(dirname "$0")/../cmd/common.sh"
+[ -f "$_OCTOP_COMMON" ] || _OCTOP_COMMON="/var/apps/octop-native/cmd/common.sh"
 [ -f "$_OCTOP_COMMON" ] && source "$_OCTOP_COMMON"
 
 APPDEST="${TRIM_APPDEST:-/var/apps/octop-native}"
