@@ -50,6 +50,24 @@ export function isImageMediaType(mime?: string): boolean {
   return Boolean(mime?.startsWith("image/"));
 }
 
+export function inferKindFromNameAndMime(
+  mediaType?: string,
+  filename?: string,
+  kind?: ChatAttachment["kind"],
+): ChatAttachment["kind"] {
+  if (kind === "image" || kind === "video" || kind === "audio") {
+    return kind;
+  }
+  const mime = (mediaType || "").toLowerCase();
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
+  const fromName = filename
+    ? getMediaKind(filename.split("?")[0] || filename)
+    : null;
+  return fromName ?? "file";
+}
+
 export function isImageFilename(name?: string): boolean {
   if (!name) return false;
   return IMAGE_EXT_RE.test(name.split("?")[0]);
