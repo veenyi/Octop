@@ -56,8 +56,11 @@ export PYTHONPATH="${SITE_PACKAGES}${PYTHONPATH:+:$PYTHONPATH}"
 export HOME="$DATA_DIR"
 export OCTOP_HOME="$DATA_DIR/.octop"
 export OCTOP_DATA_DIR="$DATA_DIR"
-# 飞牛 FPK 部署标识：禁止内置在线升级，升级请通过飞牛应用中心安装新版 FPK。
+# 飞牛 FPK 部署标识 + 打包 site-packages 路径：内置在线升级安装到此目录
+# （launcher 实际加载的位置），重启服务后即加载新版，升级真正生效
+# （见 scripts/patch_fpk_selfupdate.py 注入的 _run_fpk_upgrade）。
 export OCTOP_INSTALL_MODE="fpk-native"
+export OCTOP_FPK_SITE_PACKAGES="$SITE_PACKAGES"
 # 保持整合版「上传放开」默认：单文件上限 500MB（可用 OCTOP_MAX_UPLOAD_MB 覆盖）
 export OCTOP_MAX_UPLOAD_MB="${OCTOP_MAX_UPLOAD_MB:-500}"
 
@@ -77,6 +80,8 @@ if id octop-native >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
         HOME="$HOME" \
         OCTOP_HOME="$OCTOP_HOME" \
         OCTOP_DATA_DIR="$OCTOP_DATA_DIR" \
+        OCTOP_INSTALL_MODE="$OCTOP_INSTALL_MODE" \
+        OCTOP_FPK_SITE_PACKAGES="$OCTOP_FPK_SITE_PACKAGES" \
         "$PY" -m octop.cli.main "$@"
 else
     exec "$PY" -m octop.cli.main "$@"
