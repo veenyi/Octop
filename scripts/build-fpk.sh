@@ -90,6 +90,12 @@ build_one() {
   # 仓库单一来源 scripts/fnos/common.sh，cmd/bin 脚本统一 source cmd/common.sh。
   if [ -f "$ROOT/scripts/fnos/common.sh" ]; then
     cp "$ROOT/scripts/fnos/common.sh" "$BUILD/cmd/common.sh"
+    # 原生版同时把 common.sh 放进 app 载荷（安装后位于 $TRIM_APPDEST/cmd/common.sh），
+    # 供启动器 $(dirname $0)/../cmd/common.sh 找到（FPK 外层 cmd/ 由应用中心装到 /var/apps/<app>/cmd）。
+    if [ -f "$BUILD/app/bin/octop" ]; then
+      mkdir -p "$BUILD/app/cmd"
+      cp "$ROOT/scripts/fnos/common.sh" "$BUILD/app/cmd/common.sh"
+    fi
   fi
 
   # 注入版本号到 manifest（manifest 为 key=value 无空格格式）
