@@ -1,4 +1,5 @@
 import type { ChatAttachment } from "../hooks/sseHelpers";
+import { getMediaKind } from "../../Agent/Workspace/utils/mediaKind";
 
 export const ACCEPTED_MIME_TYPES = new Set([
   "image/png",
