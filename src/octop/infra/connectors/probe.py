@@ -23,9 +23,38 @@ from octop.infra.connectors.catalog import (
 )
 from octop.infra.connectors.gateway.protocol import handle_mcp_request
 from octop.infra.connectors.gateway.registry import probe_gateway_credentials
+from octop.infra.connectors.oauth.discovery import discover_oauth_from_mcp_url
 from octop.infra.utils.ssrf_guard import UnsafeOutboundUrl, safe_request
 
 logger = logging.getLogger(__name__)
+
+_LOCAL_WEKNORA_API_URL = "http://127.0.0.1:8080"
+_LOCAL_WEKNORA_CONSOLE_URL = "http://127.0.0.1"
+
+
+async def detect_local_weknora() -> dict[str, Any]:
+    """Detect a default host-side WeKnora deployment without persisting data.
+
+    The target is deliberately fixed to loopback.  This keeps the convenience
+    endpoint from becoming an arbitrary server-side URL fetch while matching
+    WeKnora's default Docker ports (UI 80, API 8080).
+    """
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(2.0),
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
+            response = await client.get(f"{_LOCAL_WEKNORA_API_URL}/health")
+    except httpx.HTTPError:
+        return {"found": False}
+    if not response.is_success:
+        return {"found": False}
+    return {
+        "found": True,
+        "base_url": f"{_LOCAL_WEKNORA_API_URL}/api/v1",
+        "console_url": _LOCAL_WEKNORA_CONSOLE_URL,
+    }
 
 
 def normalize_tools(raw: list[Any] | None) -> list[dict[str, str]]:
@@ -122,6 +151,30 @@ def _probe_mcp_http_error(exc: httpx.HTTPStatusError, *, kind: str) -> dict[str,
         "error": err or str(exc),
         "status_code": status,
     }
+
+
+async def _maybe_attach_oauth_discovery(
+    result: dict[str, Any],
+    *,
+    url: str,
+    headers: dict[str, str],
+) -> dict[str, Any]:
+    """When auth fails without a bearer token, try MCP OAuth discovery."""
+    if result.get("ok") is not False or result.get("error_type") != "auth":
+        return result
+    auth_header = str(headers.get("Authorization") or "").strip()
+    if auth_header.lower().startswith("bearer ") and len(auth_header) > 7:
+        return result
+    discovery = await discover_oauth_from_mcp_url(url)
+    if discovery.get("available"):
+        result["oauth"] = {
+            "available": True,
+            "issuer": discovery.get("issuer"),
+            "resource": discovery.get("resource"),
+        }
+    else:
+        result["oauth"] = {"available": False}
+    return result
 
 
 def _probe_mcp_mcp_error(exc: McpError, *, kind: str) -> dict[str, Any]:
@@ -359,7 +412,7 @@ async def probe_connector(
     headers = dict(spec.get("headers") or {})
     url = str(spec["url"])
 
-    if is_mcp_oauth_remote(entry):
+    if is_mcp_oauth_remote(entry) or entry.remote_transport == "streamable_http":
         return await probe_streamable_http_mcp(url, headers, kind=entry.kind)
 
     try:
@@ -431,6 +484,16 @@ async def probe_connector(
     }
 
 
+def format_probe_exception(exc: BaseException) -> str:
+    """Flatten TaskGroup / ExceptionGroup errors for API responses."""
+    if isinstance(exc, BaseExceptionGroup):
+        parts = [format_probe_exception(sub) for sub in exc.exceptions]
+        joined = "; ".join(part for part in parts if part)
+        return joined or str(exc)
+    msg = str(exc).strip()
+    return msg or type(exc).__name__
+
+
 async def probe_custom_mcp_server(spec: dict[str, Any]) -> dict[str, Any]:
     """Probe one user-defined MCP server (streamable_http or stdio)."""
     from octop.infra.connectors.custom_mcp import harness_spec_for_server, normalize_server_spec
@@ -448,7 +511,8 @@ async def probe_custom_mcp_server(spec: dict[str, Any]) -> dict[str, Any]:
         headers = {str(k): str(v) for k, v in dict(connection.get("headers") or {}).items()}
         # Ensure streamable Accept if caller omitted it.
         headers.setdefault("Accept", "application/json, text/event-stream")
-        return await probe_streamable_http_mcp(url, headers, kind="custom-mcp")
+        result = await probe_streamable_http_mcp(url, headers, kind="custom-mcp")
+        return await _maybe_attach_oauth_discovery(result, url=url, headers=headers)
 
     if transport == "stdio":
         return await _probe_stdio_mcp(connection)
@@ -485,4 +549,4 @@ async def _probe_stdio_mcp(connection: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "error": "stdio MCP probe timed out"}
     except Exception as exc:
         logger.exception("stdio MCP probe failed")
-        return {"ok": False, "error": str(exc)}
+        return {"ok": False, "error": format_probe_exception(exc)}

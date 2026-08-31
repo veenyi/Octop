@@ -71,6 +71,22 @@
       "pending_line": "`{pending_id}` — {count} 个工具",
       "dashboard_hint": "控制台聊天请使用审批卡片；IM 通道请使用 `/approve` 或 `/reject`。"
     },
+    "ask": {
+      "card_title": "❓ 有个地方需要你拍板",
+      "progress": "第 {current}/{total} 个问题",
+      "question_line": "**{index}. {question}**",
+      "question_line_headed": "**{index}. [{header}] {question}**",
+      "option_line": "   {opt}) {label}",
+      "option_line_desc": "   {opt}) {label} —— {description}",
+      "multi_hint": "   （可多选，如 `a,c`）",
+      "open_hint": "   （直接用一句话回答）",
+      "card_footer": "直接回复序号（如 `a`），或输入你自己的答案。",
+      "card_pending_id": "提问 ID：`{pending_id}`（30 分钟内有效）",
+      "answer_ack": "收到，继续处理…",
+      "answer_recorded": "✅ 已记录，下面是下一个问题。",
+      "not_owner": "仅被提问的用户可以回答。",
+      "answered_prefix": "用户回答："
+    },
     "title": {
       "usage": "用法：/title <标题>",
       "done": "标题已设置：{title}"
@@ -280,13 +296,23 @@
       }
     }
   },
+  "connector": {
+    "oauth": {
+      "callback_auth_failed": "授权失败：{error}",
+      "callback_missing_params": "缺少 code 或 state。",
+      "callback_invalid_state": "无效或过期的 state。",
+      "callback_token_exchange_failed": "Token 交换失败：{detail}",
+      "callback_save_failed": "保存授权失败：{detail}",
+      "callback_success": "授权完成，可关闭此窗口。"
+    }
+  },
   "errors": {
     "AUTH_FAILED": "认证失败。",
     "TOKEN_EXPIRED": "登录已过期，请重新登录。",
     "SETUP_REQUIRED": "需要完成初始设置。",
     "DATABASE_NOT_EMPTY": "目标数据库已有用户。请改用空库，或直接登录现有管理员账户。",
     "BACKUP_DRIVER_MISMATCH": "该备份与当前数据库引擎不一致（SQLite 与 PostgreSQL 不能互恢）。请将运行时切回备份所用引擎后再恢复，或在当前引擎上重新备份。暂不支持跨引擎恢复。",
-    "BACKUP_IN_PROGRESS": "已有备份任务正在进行，请稍后再试。",
+    "BACKUP_IN_PROGRESS": "已有备份或恢复任务正在进行，请稍后再试。",
     "FORBIDDEN": "没有权限。",
     "NOT_FOUND": "未找到。",
     "USER_DISABLED": "账号已禁用。",
@@ -482,6 +508,7 @@
     "mobile_handoff_to_user": "交给用户操作（手机）",
     "read_env_file": "读取环境变量",
     "write_env_file": "写入环境变量",
+    "ask_user_question": "向你提问",
     "generate_image": "生成图片",
     "generate_video": "生成视频"
   },
@@ -551,6 +578,7 @@
     "stream_stall": "模型响应中断：连接仍在，但长时间没有新内容。请点击「重试」，或稍后更换模型再试。若经常出现，请检查供应商状态，或联系管理员排查流式超时设置。",
     "rate_limit": "模型请求过于频繁，已被限流。请稍等片刻后重试，或切换其他模型。",
     "auth": "模型服务鉴权失败。请检查「设置 → 模型」中的 API Key 是否正确、是否过期。",
+    "insufficient_balance": "模型服务返回余额或额度不足。请为该 API Key 对应的账户充值或升级套餐后再试。",
     "context_length": "对话上下文过长，超出模型限制。请新开会话，或精简历史后再试。",
     "recursion_limit": "智能体已达到最大迭代次数（递归上限），任务尚未完成。请前往「运行配置」调高「最大迭代次数」后重试。",
     "timeout_network": "连接模型服务超时或网络异常。请检查网络后重试；若使用代理或自建服务，请确认其可达。",

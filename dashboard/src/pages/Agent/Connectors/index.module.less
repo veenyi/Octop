@@ -487,6 +487,31 @@
   border-radius: var(--fn-radius-md);
 }
 
+.guidedSetup {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--fn-card-border-normal);
+  border-radius: var(--fn-radius-md);
+  background: color-mix(
+    in srgb,
+    var(--connector-accent, var(--fn-color-brand)) 4%,
+    var(--fn-bg-primary)
+  );
+  font-size: 13px;
+  color: var(--fn-text-secondary);
+
+  ol {
+    margin: 6px 0 0;
+    padding-left: 20px;
+    line-height: 1.65;
+  }
+}
+
+.guidedSetupTitle {
+  color: var(--fn-text-primary);
+  font-weight: 600;
+}
+
 .guideLinks {
   display: flex;
   flex-wrap: wrap;
@@ -695,6 +720,16 @@
 .customMcpToolbar {
   display: flex;
   justify-content: flex-start;
+}
+
+.customMcpPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--fn-border-secondary);
+  border-radius: var(--fn-radius-lg);
+  background: var(--fn-bg-primary);
 }
 
 .customMcpJsonEditor {
@@ -926,6 +961,47 @@
   flex-shrink: 0;
 }
 
+.customMcpEnableControl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 4px;
+}
+
+.customMcpEnableLabel {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fn-text-secondary);
+  white-space: nowrap;
+}
+
+.customMcpCardFooter {
+  display: flex;
+  align-items: center;
+  padding: 0 16px 14px;
+  margin-top: -4px;
+}
+
+.customMcpConnectLink {
+  font-size: 12px;
+  color: var(--mcp-accent);
+  font-weight: 500;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+
+  &:hover:not(:disabled) {
+    text-decoration: underline;
+  }
+
+  &:disabled {
+    opacity: 0.65;
+    cursor: wait;
+  }
+}
+
 .customMcpCardBody {
   display: flex;
   flex-direction: column;
@@ -979,6 +1055,36 @@
 
 .customMcpFooter {
   display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--fn-border-secondary);
+  border-radius: var(--fn-radius-lg);
+  background: var(--fn-bg-primary);
+}
+
+.customMcpFooterMain {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.customMcpFooterHint {
+  margin: 0;
+  padding-left: 24px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fn-text-tertiary);
+}
+
+.customMcpFooterSave {
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.customMcpFooterSaveOnly {
   justify-content: flex-end;
-  padding-top: 4px;
 }

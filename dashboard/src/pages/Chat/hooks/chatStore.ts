@@ -2024,6 +2024,17 @@ export async function sendTurn(
 ): Promise<void> {
   const state = getOrCreate(sessionId);
 
+  if (sessionId === "__pending__" || threadId === "__pending__") {
+    appendErrorBubble(
+      state,
+      "Thread is still being created. Please retry shortly.",
+    );
+    clearStreamingFlags(state);
+    notify(state);
+    onStreamEnd?.();
+    return;
+  }
+
   if (!agentId) {
     appendErrorBubble(state, "No agent selected. Pick one from the top bar.");
     clearStreamingFlags(state);
@@ -2127,11 +2138,7 @@ async function consumeSseResponse(
       const chunk = parseHarnessChunk(line);
       if (!chunk) continue;
       handleHarnessChunk(state, chunk, sessionId);
-      if (
-        chunk.type === "done" ||
-        chunk.type === "error" ||
-        chunk.type === "hitl_required"
-      ) {
+      if (chunk.type === "done" || chunk.type === "error") {
         controller.abort();
         finish();
         return;
@@ -2152,6 +2159,7 @@ export async function resumeHitl(
   agentId: string,
   threadId: string,
   decisions: Array<{ type: string; message?: string }>,
+  onStreamEnd?: () => void,
 ): Promise<void> {
   const state = getOrCreate(sessionId);
   state.abortController?.abort();
@@ -2175,7 +2183,10 @@ export async function resumeHitl(
     (headers as Record<string, string>).Authorization = `Bearer ${token}`;
   }
 
+  let finished = false;
   const finish = () => {
+    if (finished) return;
+    finished = true;
     clearStreamingFlags(state);
     clearStreamActivity(sessionId);
     pendingResumeBySession.delete(sessionId);
@@ -2186,6 +2197,7 @@ export async function resumeHitl(
     sealInFlightAssistantMessages(state);
     notify(state);
     emitStreamEvent({ kind: "streamEnd", sessionId });
+    onStreamEnd?.();
   };
 
   try {

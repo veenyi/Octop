@@ -1,5 +1,5 @@
 import { memo, useMemo, useState, useCallback, useRef, useEffect } from "react";
-import { Image, Button } from "antd";
+import { Image, Button, Tooltip } from "antd";
 import { message as antMessage } from "@/utils/antdMessage";
 
 import Markdown from "../../../components/Markdown/LazyMarkdown";
@@ -11,6 +11,7 @@ import {
   Volume2,
   Settings,
   GitFork,
+  PanelRight,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -37,6 +38,8 @@ import {
   isChatStreamError,
 } from "../../../utils/chatStreamError";
 import { MessageFileCard } from "./MessageFileCard";
+import AskQuestionCard from "./AskQuestionCard";
+import { extractAskQuestions, isAskHitl } from "../../../api/types/hitl";
 import styles from "../index.module.less";
 import {
   DefaultToolRenderer,
@@ -51,6 +54,10 @@ import {
 import { BuiltinOctopUiFallback } from "../../../plugins/toolRenderers/builtin/BuiltinOctopUiFallback";
 import { ToolUiErrorBoundary } from "../../../plugins/toolRenderers/ToolUiErrorBoundary";
 import { lookupPluginIdForTool } from "../../../plugins/toolRenderers/toolPluginIndex";
+import { useChatToolDock } from "../ChatToolDockContext";
+import { useToolUiDockButtonStyle } from "../hooks/useToolUiDockButtonStyle";
+import type { ParsedToolOutput } from "../../../plugins/toolRenderers/types";
+import type { ToolRendererRegistration } from "../../../plugins/toolRenderers/types";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -312,19 +319,42 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+function canDockToolUi(
+  registration: ToolRendererRegistration | null,
+  parsed: ParsedToolOutput,
+): boolean {
+  if (parsed.octopUi) return true;
+  return (
+    registration != null &&
+    registration.id !== "default" &&
+    registration.pluginId !== "builtin"
+  );
+}
+
+function toolUiDockLabel(
+  toolData: NonNullable<ChatMessage["toolData"]>,
+): string {
+  return toolData.displayName?.trim() || toolData.name?.trim() || "Tool";
+}
+
 export function ToolDetailsInline({
   toolData,
   isStreaming,
   onAcpPermissionSelect,
   hideMediaPreview = false,
   agentId = null,
+  forceInline = false,
 }: {
   toolData: NonNullable<ChatMessage["toolData"]>;
   isStreaming: boolean;
   onAcpPermissionSelect?: (message: string) => void;
   hideMediaPreview?: boolean;
   agentId?: string | null;
+  /** When true, skip dock attach / placeholder (full renderer in side panel). */
+  forceInline?: boolean;
 }) {
+  const { t } = useTranslation();
+  const toolDock = useChatToolDock();
   // Plugin UIs load async after mount — bump forces resolve() to re-run.
   const rendererVersion = useToolRendererVersion();
   const parsed = useMemo(
@@ -385,13 +415,77 @@ export function ToolDetailsInline({
     agentId,
   };
 
+  const dockable = canDockToolUi(registration ?? null, parsed);
+  const callId = toolData.callId;
+  const isDocked =
+    !forceInline &&
+    dockable &&
+    !!callId &&
+    (toolDock?.isToolUiDocked(callId) ?? false);
+
+  const showDockButton =
+    !forceInline && !isDocked && dockable && !!callId && !!toolDock;
+  const { wrapRef, buttonStyle } = useToolUiDockButtonStyle(showDockButton, [
+    toolData.output,
+    registration?.id,
+    rendererVersion,
+  ]);
+
+  const openInDock = useCallback(() => {
+    if (!callId || !toolDock) return;
+    toolDock.openToolUiPanel({
+      callId,
+      title: toolUiDockLabel(toolData),
+      toolName: toolData.name,
+    });
+  }, [callId, toolData, toolDock]);
+
+  const dockActions = showDockButton ? (
+    <div className={styles.toolUiDockActions} style={buttonStyle}>
+      <Tooltip title={t("chat.openToolUiInDock", "Open in side panel")}>
+        <button
+          type="button"
+          className={styles.toolUiDockBtn}
+          onClick={openInDock}
+          aria-label={t("chat.openToolUiInDock", "Open in side panel")}
+        >
+          <PanelRight size={14} strokeWidth={2} aria-hidden />
+        </button>
+      </Tooltip>
+    </div>
+  ) : null;
+
+  if (isDocked) {
+    return (
+      <button
+        type="button"
+        className={styles.toolUiDockPlaceholder}
+        onClick={() => toolDock?.focusToolUiPanel(callId!)}
+        title={t("chat.toolUiDockedOpen", "Open side panel")}
+      >
+        <PanelRight size={16} strokeWidth={2} aria-hidden />
+        <span className={styles.toolUiDockPlaceholderTitle}>
+          {toolUiDockLabel(toolData)}
+        </span>
+        <span className={styles.toolUiDockPlaceholderHint}>
+          {t("chat.toolUiDockedHint", "Moved to side panel")}
+        </span>
+      </button>
+    );
+  }
+
   if (registration && registration.id !== "default") {
     const Comp = registration.component;
     return (
-      <div data-octop-tool-renderer="">
+      <div
+        ref={wrapRef}
+        data-octop-tool-renderer=""
+        className={styles.toolUiRendererWrap}
+      >
         <ToolUiErrorBoundary propsForFallback={props}>
           <Comp {...props} />
         </ToolUiErrorBoundary>
+        {dockActions}
       </div>
     );
   }
@@ -399,8 +493,13 @@ export function ToolDetailsInline({
   // Structured plugin envelope without a loaded custom renderer — still show a card.
   if (parsed.octopUi) {
     return (
-      <div data-octop-tool-renderer="">
+      <div
+        ref={wrapRef}
+        data-octop-tool-renderer=""
+        className={styles.toolUiRendererWrap}
+      >
         <BuiltinOctopUiFallback {...props} />
+        {dockActions}
       </div>
     );
   }
@@ -485,6 +584,32 @@ function MessageBubble({
   if (message.hitlData) {
     const actions = message.hitlData.action_requests ?? [];
     const hitlStatus = message.hitlData.status ?? "pending";
+    if (isAskHitl(actions)) {
+      // Pending questions are rendered in ChatPage's composer dock so they
+      // stay immediately above the input even when message history scrolls.
+      if (hitlStatus === "pending") return null;
+      const questions = extractAskQuestions(actions);
+      return (
+        <div
+          className={`${styles.bubble} ${styles.assistantBubble} ${
+            compact ? styles.compact : ""
+          }`}
+        >
+          <AskQuestionCard
+            questions={questions}
+            status={hitlStatus}
+            onSubmit={
+              onHitlDecision
+                ? (answer) =>
+                    onHitlDecision(
+                      actions.map(() => ({ type: "respond", message: answer })),
+                    )
+                : undefined
+            }
+          />
+        </div>
+      );
+    }
     return (
       <div
         className={`${styles.bubble} ${styles.assistantBubble} ${

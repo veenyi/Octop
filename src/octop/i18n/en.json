@@ -71,6 +71,22 @@
       "pending_line": "`{pending_id}` — {count} tool(s)",
       "dashboard_hint": "Tool approval in chat uses the approval card in the dashboard, or `/approve` / `/reject` in IM channels."
     },
+    "ask": {
+      "card_title": "❓ I need you to decide",
+      "progress": "Question {current} of {total}",
+      "question_line": "**{index}. {question}**",
+      "question_line_headed": "**{index}. [{header}] {question}**",
+      "option_line": "   {opt}) {label}",
+      "option_line_desc": "   {opt}) {label} — {description}",
+      "multi_hint": "   (multiple allowed, e.g. `a,c`)",
+      "open_hint": "   (answer in a sentence)",
+      "card_footer": "Reply with a letter (e.g. `a`) or type your own answer.",
+      "card_pending_id": "Question ID: `{pending_id}` (valid for 30 minutes)",
+      "answer_ack": "Got it. Continuing…",
+      "answer_recorded": "✅ Recorded. Here is the next question.",
+      "not_owner": "Only the user who was asked can answer.",
+      "answered_prefix": "User answered: "
+    },
     "title": {
       "usage": "Usage: /title <text>",
       "done": "Title set: {title}"
@@ -280,13 +296,23 @@
       }
     }
   },
+  "connector": {
+    "oauth": {
+      "callback_auth_failed": "Authorization failed: {error}",
+      "callback_missing_params": "Missing authorization code or state.",
+      "callback_invalid_state": "Invalid or expired authorization state.",
+      "callback_token_exchange_failed": "Token exchange failed: {detail}",
+      "callback_save_failed": "Failed to save authorization: {detail}",
+      "callback_success": "Authorization complete. You may close this window."
+    }
+  },
   "errors": {
     "AUTH_FAILED": "Authentication failed.",
     "TOKEN_EXPIRED": "Session expired. Please sign in again.",
     "SETUP_REQUIRED": "Initial setup is required.",
     "DATABASE_NOT_EMPTY": "The target database already has users. Use an empty database, or log in with the existing admin.",
     "BACKUP_DRIVER_MISMATCH": "This backup was made with a different database engine (SQLite vs PostgreSQL). Switch the runtime to match the backup, or create a new backup on the current engine. Cross-engine restore is not supported.",
-    "BACKUP_IN_PROGRESS": "A backup is already in progress. Try again shortly.",
+    "BACKUP_IN_PROGRESS": "A backup or restore is already in progress. Try again shortly.",
     "FORBIDDEN": "Permission denied.",
     "NOT_FOUND": "Not found.",
     "USER_DISABLED": "This account has been disabled.",
@@ -482,6 +508,7 @@
     "mobile_handoff_to_user": "Hand off to user (mobile)",
     "read_env_file": "Read env file",
     "write_env_file": "Write env file",
+    "ask_user_question": "Ask the user",
     "generate_image": "Generate image",
     "generate_video": "Generate video"
   },
@@ -551,6 +578,7 @@
     "stream_stall": "The model stopped sending content while the connection stayed open. Click Retry, or try again later with another model. If this happens often, check the provider status or ask an admin to review stream timeout settings.",
     "rate_limit": "The model provider rate-limited this request. Wait a moment and retry, or switch to another model.",
     "auth": "Model authentication failed. Check that the API key under Settings → Models is correct and still valid.",
+    "insufficient_balance": "The model provider rejected this request due to insufficient balance or quota. Top up or upgrade the plan for this API key, then try again.",
     "context_length": "This conversation is too long for the model's context window. Start a new chat, or shorten the history and try again.",
     "recursion_limit": "The agent hit its max iteration / recursion limit before finishing. Open Configuration and raise Max Iterations, then try again.",
     "timeout_network": "Connecting to the model timed out or the network failed. Check your network and retry. If you use a proxy or self-hosted endpoint, confirm it is reachable.",

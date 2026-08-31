@@ -85,13 +85,14 @@ def test_run_migrations_idempotent(db: SqlitePool):
         doc_cols = {
             r["name"] for r in conn.execute("PRAGMA table_info(knowledge_documents)").fetchall()
         }
-    assert v == 9
+    assert v == 10
     assert "login_failed_count" in cols
     assert "login_locked_until" in cols
     assert "preferences_json" in cols
     assert "permissions" in cols
     assert {"email", "sso_provider_id", "sso_subject"}.issubset(cols)
     assert "user_invites" in table_names
+    assert {"thread_messages", "thread_history_projection"}.issubset(table_names)
     assert "task_type" in cron_cols
     assert "mcp_servers" in cron_cols
     assert {"model_ref", "reasoning_mode", "reasoning_effort", "artifacts"}.issubset(thread_cols)
@@ -143,7 +144,7 @@ def test_migration_002_idempotent_when_column_already_present(tmp_path: Path) ->
     with pool.connect() as conn:
         v = conn.execute("SELECT version FROM _schema_version").fetchone()[0]
         cron_cols = {r["name"] for r in conn.execute("PRAGMA table_info(cron_jobs)").fetchall()}
-    assert v == 9
+    assert v == 10
     assert "mcp_servers" in cron_cols
     assert "skill_packages" in {
         r["name"]
@@ -280,8 +281,33 @@ def test_stuck_version_6_without_permissions_column_is_repaired(tmp_path: Path) 
     with pool.connect() as conn:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
         version = conn.execute("SELECT version FROM _schema_version").fetchone()[0]
-    assert version == 9
+    assert version == 10
     assert "permissions" in cols
+
+
+def test_schema_v10_without_projection_tables_is_repaired(tmp_path: Path) -> None:
+    """DBs that bumped to v10 via a colliding 010 file still get projection tables."""
+    db_path = tmp_path / "octop.db"
+    pool = SqlitePool(db_path)
+    with pool.connect() as conn:
+        conn.executescript(
+            (
+                Path(__file__).resolve().parents[3]
+                / "src/octop/infra/db/migrations/001_initial.sql"
+            ).read_text()
+        )
+        conn.execute("UPDATE _schema_version SET version = 10")
+    run_migrations(pool)
+    with pool.connect() as conn:
+        version = conn.execute("SELECT version FROM _schema_version").fetchone()[0]
+        table_names = {
+            r["name"]
+            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        kb_cols = {r["name"] for r in conn.execute("PRAGMA table_info(knowledge_bases)").fetchall()}
+    assert version == 10
+    assert {"thread_messages", "thread_history_projection"}.issubset(table_names)
+    assert "max_documents" in kb_cols
 
 
 def test_ahead_of_max_schema_version_clamps_to_max(tmp_path: Path) -> None:
@@ -311,7 +337,7 @@ def test_ahead_of_max_schema_version_clamps_to_max(tmp_path: Path) -> None:
             r["name"]
             for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
-    assert version == 9
+    assert version == 10
     assert "skill_package_id" in pkg_cols
     assert "published_expert_id" in pub_cols
     assert "user_invites" in invite_tables
@@ -350,7 +376,7 @@ def test_pre_squash_schema_version_clamped_and_knowledge_tables_filled(
             for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
         user_cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
-    assert version == 9
+    assert version == 10
     assert "permissions" in user_cols
     assert {
         "published_experts",

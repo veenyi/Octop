@@ -6,6 +6,36 @@
 
 ## [Unreleased]
 
+## [0.9.30] - 2026-08-31
+
+### 新增
+
+- 腾讯云 Token Plan 企业版与 Hy 套餐
+- WeKnora、Dify 连接器，以及自定义 MCP 的 OAuth
+- 备份/恢复、聊天工具栏、SSO 预设与更友好的供应商错误提示
+- 技能展示本地化；知识库可配置文档数量上限；钉钉扫码注册
+- 对话接入 ask-user-question 人机确认流程
+
+### 修复
+
+- 专家根目录、连接器排序、飞牛图标及主题确认对话框等界面问题
+- 聊天中文语音识别跟随界面语言
+- MCP OAuth 刷新失败需重新授权；渠道异常 thinking 输出过滤
+- 数据库 v10 迁移遗漏 thread projection 表
+- 飞牛 FPK 无效在线升级与原生版启动加载；长会话相关问题
+- 通道弹框文案统一为「通道」，新建默认实时过程
+- `octop acp` 启动即崩溃（CLI 注册表属性应对齐 `acp_cmd`）
+
+## [0.9.29] - 2026-08-27
+
+### 修复
+
+- 长会话卡死：聊天历史改为独立投影分页加载，并支持后台迁移旧会话（不再同步扫 checkpoint）
+
+### 变更
+
+- 依赖：`orcakit-harness-agent[all]>=0.9.27`、`harness-memory>=0.9.7`、`harness-browser>=0.7.6`（自动 full VACUUM 关闭，空闲维护只走 lifecycle GC + incremental `nudge_vacuum`）
+
 ## [0.9.28] - 2026-08-26
 
 ### 修复

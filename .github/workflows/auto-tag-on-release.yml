@@ -65,8 +65,9 @@ jobs:
 
       # GITHUB_TOKEN tag pushes do not cascade to other workflows. Explicitly
       # dispatch Release / Docker Publish / Desktop Package (workflow_dispatch
-      # is exempt). Desktop builds in parallel; its release job upserts zips
-      # onto the same v* GitHub Release.
+      # is exempt). FnOS FPK is cascaded from Release after the GitHub Release
+      # exists (reuses Release wheel + waits for GHCR image from Docker Publish).
+      # Desktop builds in parallel; its release job upserts zips onto the same v*.
       - name: Trigger Release, Docker Publish, and Desktop Package
         if: steps.check_tag.outputs.should_publish == 'true'
         env:

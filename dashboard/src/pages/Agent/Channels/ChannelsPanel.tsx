@@ -199,10 +199,7 @@ export default function ChannelsPanel({ agentId }: ChannelsPanelProps) {
         const next: ChannelFormValues = {
           kind: row.kind as ChannelKey,
           enabled: row.enabled,
-          response_mode:
-            cfg.response_mode === "stream"
-              ? "stream"
-              : DEFAULT_CHANNEL_DISPLAY_CONFIG.response_mode,
+          response_mode: cfg.response_mode === "stream" ? "stream" : "invoke",
           show_thinking:
             typeof cfg.show_thinking === "boolean"
               ? cfg.show_thinking
@@ -239,6 +236,14 @@ export default function ChannelsPanel({ agentId }: ChannelsPanelProps) {
     setEditing(null);
     setDrawerInitialValues(undefined);
   }, []);
+
+  const handleProvisioned = useCallback(() => {
+    message.success(t("channels.dingtalkBindSuccess"));
+    setDrawerOpen(false);
+    setEditing(null);
+    setDrawerInitialValues(undefined);
+    void fetchChannels();
+  }, [fetchChannels, t]);
 
   const handleSubmit = useCallback(
     async (
@@ -435,6 +440,7 @@ export default function ChannelsPanel({ agentId }: ChannelsPanelProps) {
         onDelete={editing ? handleDeleteFromDrawer : undefined}
         onClose={handleDrawerClose}
         onSubmit={handleSubmit}
+        onProvisioned={handleProvisioned}
         onTest={handleTestFromDrawer}
         testing={
           testState.loadingKey !== null &&

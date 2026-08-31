@@ -28,10 +28,36 @@ def test_load_provider_presets_integration() -> None:
     # over time, so assert the model family is present rather than an exact id.
     assert any(mid.startswith("deepseek-v4-flash") for mid in token_ids)
     assert any(mid.startswith("deepseek-v4-pro") for mid in token_ids)
+    assert "tc-code-latest" in token_ids
     assert token_plan.get("vendor") == "tencent"
     assert token_plan.get("provider_group") == "tencent"
+    assert token_plan.get("provider_variant") == "token_plan"
     token_deepseek = next(m for m in token_plan["models"] if m["id"].startswith("deepseek-v4"))
     assert token_deepseek["reasoning_config"]["adapter"] == "thinking_nested_effort"
+
+    enterprise = next(p for p in presets if p["id"] == "tencent-token-plan-enterprise-cn")
+    enterprise_ids = {m["id"] for m in enterprise["models"]}
+    assert enterprise["base_url"] == "https://tokenhub.tencentmaas.com/plan/v3"
+    assert enterprise.get("provider_group") == "tencent"
+    assert enterprise.get("provider_variant") == "token_plan_enterprise_cn"
+    assert {"auto", "deepseek-v4-flash", "deepseek-v4-pro", "kimi-k2.5"} <= enterprise_ids
+    assert any(mid.startswith("glm-5") for mid in enterprise_ids)
+    assert any(mid.startswith("minimax-m") for mid in enterprise_ids)
+    # Enterprise ids are bare model names, not vendor-prefixed routes.
+    assert not any("/" in model_id for model_id in enterprise_ids)
+    enterprise_deepseek = next(
+        m for m in enterprise["models"] if m["id"].startswith("deepseek-v4-pro")
+    )
+    assert enterprise_deepseek["reasoning_config"]["adapter"] == "thinking_nested_effort"
+
+    hy_plan = next(p for p in presets if p["id"] == "tencent-hy-token-plan")
+    assert hy_plan["base_url"] == "https://api.lkeap.cloud.tencent.com/plan/v3"
+    assert hy_plan.get("provider_group") == "tencent"
+    assert hy_plan.get("provider_variant") == "hy_token_plan"
+    hy_ids = {m["id"] for m in hy_plan["models"]}
+    assert {"hy3", "hy3-preview"} <= hy_ids
+    hy3 = next(m for m in hy_plan["models"] if m["id"] == "hy3")
+    assert hy3["reasoning_config"]["adapter"] == "status_only"
 
     coding_plan = next(p for p in presets if p["id"] == "tencent-coding-plan")
     assert "kimi-k2.5" in {m["id"] for m in coding_plan["models"]}

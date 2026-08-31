@@ -18,6 +18,17 @@ export interface ConnectorCatalogEntry {
   supports_quick_auth?: boolean;
   oauth_mode?: "dynamic" | "configured" | null;
   oauth_ready?: boolean;
+  credential_fields?: ConnectorCredentialField[];
+}
+
+export interface ConnectorCredentialField {
+  key: string;
+  label: string;
+  field_type: "text" | "password" | "url" | "tags";
+  required: boolean;
+  placeholder?: string | null;
+  help?: string | null;
+  secret: boolean;
 }
 
 export interface ConnectorAuthInfo {
@@ -42,6 +53,7 @@ export interface ConnectorInstance {
 }
 
 export interface ConnectorCredentialsPreview {
+  [key: string]: unknown;
   token_configured?: boolean;
   oauth_configured?: boolean;
   expires_at?: number;
@@ -82,10 +94,28 @@ export interface ConnectorProbeResult {
   tool_count?: number;
   tools?: { name: string; description: string }[];
   error?: string;
+  error_type?: string;
   status_code?: number;
+  oauth?: {
+    available: boolean;
+    issuer?: string;
+    resource?: string;
+  };
+}
+
+export interface WeKnoraLocalDetection {
+  found: boolean;
+  base_url?: string;
+  console_url?: string;
 }
 
 export type CustomMcpTransport = "streamable_http" | "stdio";
+
+export interface CustomMcpOAuthPreview {
+  configured?: boolean;
+  required?: boolean;
+  expires_at?: number;
+}
 
 export interface CustomMcpServerSpec {
   transport: CustomMcpTransport;
@@ -99,7 +129,12 @@ export interface CustomMcpServerSpec {
   display_name?: string;
   /** When true, chat composer pre-selects this MCP server. */
   default_open?: boolean;
+  oauth?: CustomMcpOAuthPreview;
 }
+
+export type OAuthStartTarget =
+  | { type: "catalog"; kind: string }
+  | { type: "custom_mcp"; server_name: string };
 
 export type CustomMcpServers = Record<string, CustomMcpServerSpec>;
 
@@ -141,10 +176,15 @@ export interface FeishuUserAuthCompleteResult {
 export const connectorsApi = {
   catalog: () => request<ConnectorCatalogEntry[]>("/connectors/catalog"),
 
+  detectLocalWeKnora: () =>
+    request<WeKnoraLocalDetection>("/connectors/weknora/detect-local"),
+
   listInstances: () => request<ConnectorInstance[]>("/connector-instances"),
 
   getInstance: (instanceId: string) =>
-    request<ConnectorInstanceDetail>(`/connector-instances/${instanceId}`),
+    request<ConnectorInstanceDetail>(
+      `/connector-instances/${encodeURIComponent(instanceId)}`,
+    ),
 
   createInstance: (body: {
     kind: string;
@@ -158,23 +198,41 @@ export const connectorsApi = {
     }),
 
   deleteInstance: (instanceId: string) =>
-    request<void>(`/connector-instances/${instanceId}`, { method: "DELETE" }),
+    request<void>(`/connector-instances/${encodeURIComponent(instanceId)}`, {
+      method: "DELETE",
+    }),
 
   patchInstance: (
     instanceId: string,
     body: { status?: "active" | "disabled"; default_open?: boolean },
   ) =>
-    request<ConnectorInstance>(`/connector-instances/${instanceId}`, {
-      method: "PATCH",
-      body: JSON.stringify(body),
-    }),
+    request<ConnectorInstance>(
+      `/connector-instances/${encodeURIComponent(instanceId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      },
+    ),
 
   testInstance: (instanceId: string) =>
-    request<ConnectorProbeResult>(`/connector-instances/${instanceId}/test`, {
-      method: "POST",
-    }),
+    request<ConnectorProbeResult>(
+      `/connector-instances/${encodeURIComponent(instanceId)}/test`,
+      {
+        method: "POST",
+      },
+    ),
 
-  oauthStart: (kind: string, redirectAfter?: string) =>
+  oauthStart: (target: OAuthStartTarget, redirectAfter?: string) =>
+    request<{ authorize_url: string; state_id: string }>(
+      "/connectors/oauth/start",
+      {
+        method: "POST",
+        body: JSON.stringify({ target, redirect_after: redirectAfter }),
+      },
+    ),
+
+  /** @deprecated Prefer oauthStart with `{ type: "catalog", kind }`. */
+  oauthStartCatalog: (kind: string, redirectAfter?: string) =>
     request<{ authorize_url: string; state_id: string }>(
       `/connectors/oauth/${kind}/start`,
       {
@@ -184,9 +242,12 @@ export const connectorsApi = {
     ),
 
   oauthPending: (stateId: string) =>
-    request<{ kind: string; tokens: Record<string, unknown> }>(
-      `/connectors/oauth/pending/${stateId}`,
-    ),
+    request<{
+      kind: string;
+      tokens: Record<string, unknown>;
+      server_name?: string;
+      applied?: boolean;
+    }>(`/connectors/oauth/pending/${stateId}`),
 
   authorizeUrl: (kind: string) =>
     request<{ authorize_url: string | null }>(
@@ -284,7 +345,10 @@ export const connectorsApi = {
       body: JSON.stringify({ servers }),
     }),
 
-  patchCustomMcpServer: (name: string, body: { enabled: boolean }) =>
+  patchCustomMcpServer: (
+    name: string,
+    body: { enabled?: boolean; default_open?: boolean },
+  ) =>
     request<{ servers: CustomMcpServers }>(
       `/connectors/custom-mcp/servers/${encodeURIComponent(name)}`,
       {
