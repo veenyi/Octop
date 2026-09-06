@@ -194,6 +194,17 @@ curl -fsSL https://finnie-1258344699.cos.ap-guangzhou.myqcloud.com/octop/install
 
 完整安装选项见 [scripts/README.md](scripts/README.md)（`--version`、`--from-source`、`--mirror` 及 Windows 参数）。
 
+**桌面客户端**（图形界面，无需终端）— 从 [GitHub Releases](https://github.com/TencentCloud/Octop/releases/latest) 下载对应平台的安装包：
+
+| 平台 | 制品 |
+|------|------|
+| Windows | `Octop-desktop-windows-amd64-<version>.exe`（64 位）/ `Octop-desktop-windows-arm64-<version>.exe`（ARM64）— NSIS 安装程序 |
+| macOS | `Octop-desktop-darwin-arm64-<version>.dmg`（Apple 芯片）/ `Octop-desktop-darwin-amd64-<version>.dmg`（Intel） |
+| Linux | `Octop-desktop-linux-amd64-<version>.tar.gz` / `Octop-desktop-linux-arm64-<version>.tar.gz` |
+| 飞牛 NAS（FnOS） | `Octop-fnos-docker-<version>.fpk`（依赖 Docker）/ `Octop-fnos-native-<version>.fpk`（无需 Docker）— 通过应用中心安装 |
+
+桌面客户端说明见 [desktop/README.md](desktop/README.md)，飞牛打包指南见 [fnos/README.md](fnos/README.md)。
+
 **备选 — PyPI**（若你已自行管理 Python 环境）：
 
 ```bash
@@ -224,8 +235,6 @@ octop service start
 
 打开 **http://127.0.0.1:8088**。Docker 首次初始化默认账号为 `admin` / `Octop123`，请立即修改密码。交互式 `octop init` / 设置向导会让你自行设置密码（至少 8 位，且同时包含字母和数字）。
 
-> ⚠️ **安全提醒：** Docker 默认管理员密码为 `Octop123`，首次启动后请尽快在「个人设置 → 修改密码」中更换，避免服务暴露到公网时被未授权访问。
-
 ### Docker（推荐用于生产部署）
 
 ```bash
@@ -242,9 +251,9 @@ docker run -d \
   octop:latest
 ```
 
-打开 `http://localhost:8088` — 默认账号 `admin` / `Octop123`（请立即修改密码）。首次启动也会把凭据写入 `/data/.octop/credential.txt`。
+打开 `http://localhost:8088`。首次初始化会以固定默认凭据创建管理员：`admin` / `Octop123`（并写入容器内 `/data/.octop/credential.txt`）——**并非随机生成**。可通过 `OCTOP_ADMIN_USERNAME` / `OCTOP_DEFAULT_PASSWORD` 覆盖默认值。
 
-> **密码策略：** 至少 8 位，且同时包含字母和数字。后续计划改为首次启动随机生成密码，并仅写入 `credential.txt`。
+> **密码策略：** 至少 8 位，且同时包含字母和数字。
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|

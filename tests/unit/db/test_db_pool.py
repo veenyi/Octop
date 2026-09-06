@@ -64,6 +64,7 @@ def test_run_migrations_creates_tables(db: SqlitePool):
         "knowledge_documents",
         "sso_providers",
         "sso_login_states",
+        "trajectory_events",
     }
     assert expected.issubset(names)
     assert "knowledge_base_members" not in names
@@ -85,16 +86,27 @@ def test_run_migrations_idempotent(db: SqlitePool):
         doc_cols = {
             r["name"] for r in conn.execute("PRAGMA table_info(knowledge_documents)").fetchall()
         }
-    assert v == 10
+        connector_cols = {
+            r["name"] for r in conn.execute("PRAGMA table_info(connectors)").fetchall()
+        }
+        connector_indexes = {
+            r["name"] for r in conn.execute("PRAGMA index_list(connectors)").fetchall()
+        }
+    assert v == 13
     assert "login_failed_count" in cols
     assert "login_locked_until" in cols
     assert "preferences_json" in cols
     assert "permissions" in cols
     assert {"email", "sso_provider_id", "sso_subject"}.issubset(cols)
     assert "user_invites" in table_names
-    assert {"thread_messages", "thread_history_projection"}.issubset(table_names)
+    assert {"thread_messages", "thread_history_projection", "trajectory_events"}.issubset(
+        table_names
+    )
     assert "task_type" in cron_cols
     assert "mcp_servers" in cron_cols
+    assert "name" in cron_cols
+    assert "shared" in connector_cols
+    assert "idx_connectors_user_display_name" in connector_indexes
     assert {"model_ref", "reasoning_mode", "reasoning_effort", "artifacts"}.issubset(thread_cols)
     assert {
         "color",
@@ -126,6 +138,7 @@ def test_repair_legacy_schema_ensures_columns(tmp_path: Path) -> None:
     with pool.connect() as conn:
         cron_cols = {r["name"] for r in conn.execute("PRAGMA table_info(cron_jobs)").fetchall()}
     assert "task_type" in cron_cols
+    assert "name" in cron_cols
 
 
 def test_migration_002_idempotent_when_column_already_present(tmp_path: Path) -> None:
@@ -144,7 +157,7 @@ def test_migration_002_idempotent_when_column_already_present(tmp_path: Path) ->
     with pool.connect() as conn:
         v = conn.execute("SELECT version FROM _schema_version").fetchone()[0]
         cron_cols = {r["name"] for r in conn.execute("PRAGMA table_info(cron_jobs)").fetchall()}
-    assert v == 10
+    assert v == 13
     assert "mcp_servers" in cron_cols
     assert "skill_packages" in {
         r["name"]
@@ -281,7 +294,7 @@ def test_stuck_version_6_without_permissions_column_is_repaired(tmp_path: Path) 
     with pool.connect() as conn:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
         version = conn.execute("SELECT version FROM _schema_version").fetchone()[0]
-    assert version == 10
+    assert version == 13
     assert "permissions" in cols
 
 
@@ -305,9 +318,13 @@ def test_schema_v10_without_projection_tables_is_repaired(tmp_path: Path) -> Non
             for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
         kb_cols = {r["name"] for r in conn.execute("PRAGMA table_info(knowledge_bases)").fetchall()}
-    assert version == 10
-    assert {"thread_messages", "thread_history_projection"}.issubset(table_names)
+        cron_cols = {r["name"] for r in conn.execute("PRAGMA table_info(cron_jobs)").fetchall()}
+    assert version == 13
+    assert {"thread_messages", "thread_history_projection", "trajectory_events"}.issubset(
+        table_names
+    )
     assert "max_documents" in kb_cols
+    assert "name" in cron_cols
 
 
 def test_ahead_of_max_schema_version_clamps_to_max(tmp_path: Path) -> None:
@@ -337,10 +354,54 @@ def test_ahead_of_max_schema_version_clamps_to_max(tmp_path: Path) -> None:
             r["name"]
             for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
-    assert version == 10
+    assert version == 13
     assert "skill_package_id" in pkg_cols
     assert "published_expert_id" in pub_cols
     assert "user_invites" in invite_tables
+
+
+def test_current_watermark_repairs_pre_v13_connectors_schema(tmp_path: Path) -> None:
+    """A folded v13 schema change is repaired even when migration 013 is skipped."""
+    pool = SqlitePool(tmp_path / "octop.db")
+    with pool.connect() as conn:
+        conn.executescript(
+            (
+                Path(__file__).resolve().parents[3]
+                / "src/octop/infra/db/migrations/001_initial.sql"
+            ).read_text()
+        )
+        conn.execute("UPDATE _schema_version SET version = 13")
+        conn.execute(
+            "INSERT INTO users(username, password_hash, role, created_at) "
+            "VALUES ('owner', 'hash', 'admin', 1)"
+        )
+        user_id = conn.execute("SELECT id FROM users WHERE username = 'owner'").fetchone()[0]
+        conn.execute(
+            "INSERT INTO connectors("
+            "instance_id, user_id, kind, display_name, mcp_server_name, created_at, updated_at"
+            ") VALUES ('instance-1', ?, 'github', 'GitHub', 'connector_github_1', 1, 1)",
+            (user_id,),
+        )
+
+    run_migrations(pool)
+
+    with pool.connect() as conn:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(connectors)").fetchall()}
+        user_id = conn.execute("SELECT id FROM users WHERE username = 'owner'").fetchone()[0]
+        conn.execute(
+            "INSERT INTO connectors("
+            "instance_id, user_id, kind, display_name, mcp_server_name, created_at, updated_at"
+            ") VALUES ('instance-2', ?, 'github', 'GitHub Work', 'connector_github_2', 1, 1)",
+            (user_id,),
+        )
+        count = conn.execute(
+            "SELECT COUNT(*) FROM connectors WHERE user_id = ? AND kind = 'github'",
+            (user_id,),
+        ).fetchone()[0]
+
+    assert "shared" in columns
+    assert count == 2
+    pool.close()
 
 
 def test_foreign_keys_enabled(db: SqlitePool):
@@ -363,8 +424,8 @@ def test_pre_squash_schema_version_clamped_and_knowledge_tables_filled(
             ).read_text()
         )
         # Simulate a develop DB whose recorded version is ahead of the
-        # consolidated max (v7), so reconcile clamps and repairs knowledge tables.
-        conn.execute("UPDATE _schema_version SET version = 12")
+        # consolidated max, so reconcile clamps and repairs knowledge tables.
+        conn.execute("UPDATE _schema_version SET version = 13")
         conn.execute("ALTER TABLE agents ADD COLUMN is_shared INTEGER NOT NULL DEFAULT 0")
 
     run_migrations(pool)
@@ -376,7 +437,7 @@ def test_pre_squash_schema_version_clamped_and_knowledge_tables_filled(
             for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
         user_cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
-    assert version == 10
+    assert version == 13
     assert "permissions" in user_cols
     assert {
         "published_experts",

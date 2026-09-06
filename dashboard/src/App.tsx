@@ -4,7 +4,10 @@ import zhCN from "antd/locale/zh_CN";
 import enUS from "antd/locale/en_US";
 import { useEffect } from "react";
 import DesktopWindowControls from "./components/DesktopWindowControls";
-import { useDesktopChrome } from "./hooks/useDesktopChrome";
+import {
+  DesktopChromeProvider,
+  useDesktopChrome,
+} from "./hooks/useDesktopChrome";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import MainLayout from "./layouts/MainLayout";
@@ -13,6 +16,7 @@ import OidcComplete from "./pages/Login/OidcComplete";
 import SetupPage from "./pages/Setup";
 import InvitePage from "./pages/Invite";
 import AuthGuard from "./components/AuthGuard";
+import OctopSpinner from "./components/OctopSpinner";
 import { AntdAppProvider } from "./components/AntdAppProvider";
 import GlobalErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider, useTheme } from "./context/ThemeContext";
@@ -26,6 +30,7 @@ import { brandTokensFor } from "./styles/themePalettes";
 import "./styles/theme-vars.css";
 import "./styles/layout.css";
 import "./styles/form-override.css";
+import "./styles/spin-override.css";
 
 const GlobalStyle = createGlobalStyle`
 * {
@@ -111,31 +116,38 @@ function ThemedApp() {
   };
 
   return (
-    <ConfigProvider theme={themeConfig} prefixCls="octop" locale={antdLocale}>
+    <ConfigProvider
+      theme={themeConfig}
+      prefixCls="octop"
+      locale={antdLocale}
+      spin={{ indicator: <OctopSpinner /> }}
+    >
       <AntdAppProvider>
-        {desktopChrome ? (
-          <DesktopWindowControls chrome={desktopChrome} />
-        ) : null}
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/login/oidc/complete" element={<OidcComplete />} />
-          <Route path="/setup" element={<SetupPage />} />
-          <Route path="/invite" element={<InvitePage />} />
-          <Route
-            path="/*"
-            element={
-              <AuthGuard>
-                <AgentProvider>
-                  <LayoutModeProvider>
-                    <VoiceOutputProvider>
-                      <MainLayout />
-                    </VoiceOutputProvider>
-                  </LayoutModeProvider>
-                </AgentProvider>
-              </AuthGuard>
-            }
-          />
-        </Routes>
+        <DesktopChromeProvider value={desktopChrome}>
+          {desktopChrome ? (
+            <DesktopWindowControls chrome={desktopChrome} />
+          ) : null}
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/login/oidc/complete" element={<OidcComplete />} />
+            <Route path="/setup" element={<SetupPage />} />
+            <Route path="/invite" element={<InvitePage />} />
+            <Route
+              path="/*"
+              element={
+                <AuthGuard>
+                  <AgentProvider>
+                    <LayoutModeProvider>
+                      <VoiceOutputProvider>
+                        <MainLayout />
+                      </VoiceOutputProvider>
+                    </LayoutModeProvider>
+                  </AgentProvider>
+                </AuthGuard>
+              }
+            />
+          </Routes>
+        </DesktopChromeProvider>
       </AntdAppProvider>
     </ConfigProvider>
   );

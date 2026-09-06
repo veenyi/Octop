@@ -26,7 +26,7 @@
 docker compose -f docker/docker-compose.yml up -d --build
 ```
 
-访问 `http://localhost:8088`，默认账号 `admin` / `Octop123`（仅首次初始化生效，请立即修改）。密码须 ≥8 位且同时包含字母和数字。后续计划改为首次启动随机生成密码，并仅写入 `credential.txt`。
+访问 `http://localhost:8088`。默认凭据：`admin` / `Octop123`（仅在首次初始化时生效，请立即修改密码）。密码须 ≥8 位且同时包含字母和数字。后续版本可能改为首次启动随机生成并仅写入 `credential.txt`。
 
 **方式二：构建脚本**
 

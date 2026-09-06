@@ -23,6 +23,7 @@ import {
 } from "antd";
 
 import {
+  AlertCircle,
   Bot,
   CheckCircle2,
   Copy,
@@ -40,6 +41,7 @@ import { useTranslation } from "react-i18next";
 
 import StreamEdgeControls from "../../../components/StreamEdgeControls/StreamEdgeControls";
 import StreamSetupGuide from "../../../components/StreamSetupGuide/StreamSetupGuide";
+import { OctopEmptyMascot } from "../../../components/EmptyState";
 import PageShell from "../../../layouts/PageShell";
 import BrowserAiPanel from "../../../components/BrowserAiPanel";
 import SkillRecordGuideModal from "../../../components/SkillRecordGuideModal";
@@ -49,7 +51,6 @@ import BrowserViewer, {
 import { useAgent } from "../../../context/AgentContext";
 import { browserApi } from "../../../api/modules/browser";
 import * as chatStore from "../../Chat/hooks/chatStore";
-import type { BrowserSession as HarnessSession } from "../../../api/types/browser";
 import { request } from "../../../api/request";
 import { normalizeUrl } from "../../../utils/normalizeUrl";
 import { clearCanvas } from "../../../utils/browserCanvas";
@@ -75,6 +76,8 @@ import {
 } from "../../../hooks/useViewportMode";
 import { useIsMobile } from "../../../hooks/useIsMobile";
 import { useLandscapeFullscreen } from "../../../hooks/useLandscapeFullscreen";
+import { useCurrentUser } from "../../../hooks/useCurrentUser";
+import { resolveBrowserProfile } from "../../../utils/browserProfile";
 import styles from "./index.module.less";
 
 const { Text } = Typography;
@@ -126,20 +129,15 @@ const BROWSER_AI_PANEL_MAX_WIDTH = 620;
 const BROWSER_AI_PANEL_MIN_HEIGHT = 200;
 const BROWSER_AI_PANEL_MAX_HEIGHT = 520;
 
-function readStoredProfile(): string | null {
-  try {
-    return (
-      localStorage.getItem(PROFILE_STORAGE_KEY) ??
-      localStorage.getItem(LEGACY_SESSION_STORAGE_KEY)
-    );
-  } catch {
-    return null;
-  }
+function profileStorageKey(userId?: number): string {
+  return userId == null
+    ? PROFILE_STORAGE_KEY
+    : `${PROFILE_STORAGE_KEY}:${userId}`;
 }
 
-function persistProfile(profile: string) {
+function persistProfile(profile: string, userId?: number) {
   try {
-    localStorage.setItem(PROFILE_STORAGE_KEY, profile);
+    localStorage.setItem(profileStorageKey(userId), profile);
     localStorage.removeItem(LEGACY_SESSION_STORAGE_KEY);
   } catch {
     /* ignore */
@@ -164,22 +162,6 @@ function setStreamActive(active: boolean) {
   } catch {
     /* ignore */
   }
-}
-
-function pickProfile(
-  sessions: HarnessSession[],
-  threadFromUrl?: string,
-  stored?: string | null,
-): string {
-  if (threadFromUrl) return threadFromUrl;
-  if (stored && sessions.some((s) => s.session_id === stored)) return stored;
-  if (sessions.length > 0) {
-    const sorted = [...sessions].sort(
-      (a, b) => (b.last_activity_at ?? 0) - (a.last_activity_at ?? 0),
-    );
-    return sorted[0].session_id;
-  }
-  return stored ?? "default";
 }
 
 function tabsFromStream(
@@ -312,6 +294,8 @@ export default function RemoteBrowserPage({
   const { t } = useTranslation();
   const { modal, message: antMessage } = App.useApp();
   const isMobile = useIsMobile();
+  const currentUser = useCurrentUser();
+  const browserProfile = resolveBrowserProfile(currentUser?.id);
   const { activeAgent, activeAgentId, agents } = useAgent();
   const [searchParams] = useSearchParams();
   const threadFromUrl =
@@ -470,14 +454,17 @@ export default function RemoteBrowserPage({
     setFrameReady(ready);
   }, []);
 
-  const attachProfile = useCallback((profileId: string, tabs: BrowserTab[]) => {
-    profileIdRef.current = profileId;
-    const view = viewFromProfile(profileId, tabs);
-    setSession(view);
-    persistProfile(profileId);
-    if (urlEditingRef.current) return;
-    if (view.url) setNavUrl(view.url);
-  }, []);
+  const attachProfile = useCallback(
+    (profileId: string, tabs: BrowserTab[]) => {
+      profileIdRef.current = profileId;
+      const view = viewFromProfile(profileId, tabs);
+      setSession(view);
+      persistProfile(profileId, currentUser?.id);
+      if (urlEditingRef.current) return;
+      if (view.url) setNavUrl(view.url);
+    },
+    [currentUser?.id],
+  );
 
   // Shared stream controller — measures the container, resolves the viewport
   // (mobile-aware), opens the WebSocket, and paints frames onto the canvas.
@@ -523,21 +510,20 @@ export default function RemoteBrowserPage({
   }, [t]);
 
   const refreshSessions = useCallback(async (): Promise<string | null> => {
+    if (!browserProfile) return null;
     try {
-      const resp = await browserApi.getSessions();
-      const sessions = resp.ok ? resp.sessions : [];
-      const profile = pickProfile(sessions, threadFromUrl, readStoredProfile());
+      await browserApi.getSessions();
       // Restore stream only when the user left it open, or when deep-linked
       // via ?thread=… — do not auto-open just because Chrome is still alive.
       if (threadFromUrl || readStreamActive()) {
-        startStream(profile, "");
-        return profile;
+        startStream(browserProfile, "");
+        return browserProfile;
       }
       return null;
     } catch {
       return null;
     }
-  }, [startStream, threadFromUrl]);
+  }, [browserProfile, startStream, threadFromUrl]);
 
   useEffect(() => {
     void refreshEnv();
@@ -612,10 +598,10 @@ export default function RemoteBrowserPage({
   const handleUninstall = useCallback(() => {
     if (!envStatus?.playwright_chromium || uninstalling) return;
     modal.confirm({
-      title: t("remoteBrowser.uninstallTitle", "卸载远程浏览器"),
+      title: t("remoteBrowser.uninstallTitle", "卸载内置浏览器"),
       content: t(
         "remoteBrowser.uninstallConfirm",
-        "将关闭 Octop 浏览器会话，并删除通过 Playwright 安装的 Chromium。不会影响本机已有的 Chrome/Chromium。是否继续？",
+        "将关闭当前浏览器窗口，并卸载 Octop 自动安装的浏览器。你电脑上已有的 Chrome 等浏览器不受影响。",
       ),
       okText: t("remoteBrowser.uninstall", "卸载"),
       okButtonProps: { danger: true },
@@ -645,10 +631,7 @@ export default function RemoteBrowserPage({
                 if (removed) {
                   setUninstallLogs([]);
                   antMessage.success(
-                    t(
-                      "remoteBrowser.uninstallSuccess",
-                      "已删除 Playwright Chromium",
-                    ),
+                    t("remoteBrowser.uninstallSuccess", "内置浏览器已卸载"),
                   );
                   resolve();
                   return;
@@ -715,21 +698,16 @@ export default function RemoteBrowserPage({
   }, []);
 
   const createSession = useCallback(async () => {
+    if (!browserProfile) return;
     setCreating(true);
     try {
-      const resp = await browserApi.getSessions();
-      const profile = pickProfile(
-        resp.ok ? resp.sessions : [],
-        threadFromUrl,
-        readStoredProfile(),
-      );
-      startStream(profile, normalizeUrl(navUrl) || DEFAULT_START_URL);
+      startStream(browserProfile, normalizeUrl(navUrl) || DEFAULT_START_URL);
     } catch (err: unknown) {
       showApiError(err, t("remoteBrowser.createSessionFailed"), t);
     } finally {
       setCreating(false);
     }
-  }, [navUrl, startStream, t, threadFromUrl]);
+  }, [browserProfile, navUrl, startStream, t]);
 
   const closeSession = useCallback(() => {
     disconnect();
@@ -738,31 +716,30 @@ export default function RemoteBrowserPage({
     setFrameReady(false);
     setStreamActive(false);
     try {
-      localStorage.removeItem(PROFILE_STORAGE_KEY);
+      localStorage.removeItem(profileStorageKey(currentUser?.id));
     } catch {
       /* ignore */
     }
     clearCanvas(canvasRef.current);
-  }, [disconnect]);
+  }, [currentUser?.id, disconnect]);
 
   const shutdownBrowser = useCallback(() => {
-    const profile = profileIdRef.current || "default";
     modal.confirm({
-      title: t("remoteBrowser.shutdownTitle", "关闭浏览器进程"),
+      title: t("remoteBrowser.shutdownTitle", "关闭浏览器"),
       content: t(
         "remoteBrowser.shutdownConfirm",
-        "将结束本机 Chrome 进程并释放内存。登录状态会保留在磁盘，下次启动仍可复用。是否继续？",
+        "将关闭当前浏览器窗口。已登录的网站下次打开时仍然有效。",
       ),
       okText: t("remoteBrowser.stop", "关闭浏览器"),
       okButtonProps: { danger: true },
       cancelText: t("common.cancel"),
       onOk: async () => {
         try {
-          await browserApi.shutdown(profile);
+          await browserApi.shutdown();
         } catch (err: unknown) {
           showApiError(
             err,
-            t("remoteBrowser.shutdownFailed", "关闭浏览器进程失败"),
+            t("remoteBrowser.shutdownFailed", "关闭浏览器失败"),
             t,
           );
           throw err;
@@ -963,11 +940,8 @@ export default function RemoteBrowserPage({
       /* ignore */
     }
 
-    const profileId = profileIdRef.current || "default";
     try {
       const data = await browserApi.startRecording({
-        profile: profileId,
-        agentProfile: profileId,
         name: `browser-skill-${Date.now()}`,
       });
       if (data.ok) {
@@ -995,7 +969,7 @@ export default function RemoteBrowserPage({
           : t("browser.recordReplay.startFailed", "开始录制失败"),
       );
     }
-  }, [t]);
+  }, [antMessage, t]);
 
   const envReady = Boolean(envStatus?.browsers_ok);
   const showEdgeControls = Boolean(session) && isStreaming && frameReady;
@@ -1139,24 +1113,16 @@ export default function RemoteBrowserPage({
     }
 
     if (envReady) {
-      const harnessOk = envStatus?.harness_browser;
-      const pwOk = envStatus?.playwright;
-      const subTitle =
-        harnessOk && pwOk
-          ? t(
-              "remoteBrowser.envReadyBoth",
-              "harness-browser 与 Playwright 均可用",
-            )
-          : harnessOk
-          ? t("remoteBrowser.envReadyHarness", "harness-browser (CDP) 已就绪")
-          : t("remoteBrowser.envReady", "Playwright 与 Chromium 均可用");
       return (
         <Result
           icon={
             <CheckCircle2 size={40} color="var(--fn-color-success,#52c41a)" />
           }
-          title={t("remoteBrowser.browserAlreadyInstalled", "浏览器已安装")}
-          subTitle={subTitle}
+          title={t("remoteBrowser.browserAlreadyInstalled", "浏览器已就绪")}
+          subTitle={t(
+            "remoteBrowser.envReady",
+            "可以帮你打开网页、填写表单和截图了",
+          )}
           style={{ padding: "8px 0" }}
         />
       );
@@ -1192,13 +1158,14 @@ export default function RemoteBrowserPage({
     }
 
     return (
-      <Alert
-        type="warning"
-        showIcon
-        message={t("remoteBrowser.notInstalled", "Chromium 未安装")}
-        description={
-          envStatus?.error ?? t("remoteBrowser.notInstalledHint", "点击安装")
-        }
+      <Result
+        icon={<AlertCircle size={40} color="var(--fn-color-warning,#faad14)" />}
+        title={t("remoteBrowser.notInstalled", "未检测到可用浏览器")}
+        subTitle={t(
+          "remoteBrowser.notInstalledHint",
+          "Octop 需要浏览器才能帮你自动打开网页、填写表单和截图。点击下方按钮即可自动安装，无需手动配置。",
+        )}
+        style={{ padding: "8px 0" }}
       />
     );
   };
@@ -1339,7 +1306,7 @@ export default function RemoteBrowserPage({
     type: "default" as const,
     title: t(
       "remoteBrowser.checkInstallTip",
-      "检查 Playwright 浏览器是否已安装，未安装则可安装",
+      "检查本机是否已准备好浏览器，未安装时可一键安装",
     ),
   };
 
@@ -1499,11 +1466,16 @@ export default function RemoteBrowserPage({
                   renderViewportUninstallProgress()
                 ) : (
                   <StreamSetupGuide
-                    icon={<Globe size={48} strokeWidth={1.5} />}
+                    icon={
+                      <OctopEmptyMascot
+                        size={120}
+                        className={styles.setupMascot}
+                      />
+                    }
                     title={
                       envReady
                         ? t("remoteBrowser.startBrowserTitle", "启动远程浏览器")
-                        : t("remoteBrowser.setupTitle", "需要配置浏览器环境")
+                        : t("remoteBrowser.setupTitle", "需要安装浏览器")
                     }
                     description={
                       envReady
@@ -1511,10 +1483,9 @@ export default function RemoteBrowserPage({
                             "remoteBrowser.startBrowserDesc",
                             "环境已就绪，按以下步骤开始远程浏览与操控",
                           )
-                        : envStatus?.error ||
-                          t(
+                        : t(
                             "remoteBrowser.setupDesc",
-                            "按以下步骤完成 Playwright / Chromium 环境配置",
+                            "先安装浏览器，即可开始远程浏览和自动操作网页",
                           )
                     }
                     steps={
@@ -1537,7 +1508,7 @@ export default function RemoteBrowserPage({
                             {
                               label: t(
                                 "remoteBrowser.setupStep1",
-                                "点击「检查」，检测 Playwright 与 Chromium 是否可用",
+                                "点击「检查」，确认本机是否已有可用浏览器",
                               ),
                             },
                             {
