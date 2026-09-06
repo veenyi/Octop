@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "octop"
-version = "0.9.31"
+version = "0.9.32"
 description = "Smarter self-hosted AI assistant for multiple users and agents, built on harness-agent"
 readme = "README.md"
 license = { text = "MIT" }
@@ -21,9 +21,10 @@ dependencies = [
     "apscheduler>=3.10,<4",
     "argon2-cffi>=23.1",
     "pyjwt>=2.8",
-    "orcakit-harness-agent[all]>=1.0.2",
-    "harness-memory>=0.9.7",
-    "harness-gateway>=0.9.3",
+    "orcakit-harness-agent[all]>=1.0.4",
+    "harness-memory>=0.9.9",
+    "harness-gateway>=0.9.5",
+    "lark-oapi>=1.5.5",
     "cryptography>=41",
     "scalar-fastapi>=1.0",
     "edge-tts>=6.1",
@@ -32,7 +33,7 @@ dependencies = [
     "acme>=5.6.0",
     "josepy>=2.2.0",
     "boto3>=1.40.61",
-    "harness-browser>=0.7.7",
+    "harness-browser>=0.7.8",
     "playwright>=1.40",
     "psycopg[binary]>=3.2",
     "langgraph-checkpoint-postgres>=2.0",
@@ -42,6 +43,8 @@ dependencies = [
     "python-docx>=1.2.0",
     "python-pptx>=1.0",
     "pypinyin>=0.53",
+    "openpyxl>=3.1",
+    "xlrd>=2.0.1",
 ]
 
 [project.optional-dependencies]
@@ -57,6 +60,7 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
     "build>=1.0",
+    "xlwt>=1.3",
 ]
 # Kept for backward compatibility; playwright is now a core dependency.
 browser = [
@@ -66,6 +70,11 @@ browser = [
 desktop = ["mss>=9.0", "pynput>=1.7"]
 # Local ONNX / fastembed embedding models (Models admin local tab).
 local-embedding = ["fastembed>=0.4", "huggingface_hub>=0.20"]
+knowledge-ocr = [
+    "rapidocr>=3.4,<4",
+    "onnxruntime>=1.17",
+    "pymupdf>=1.24",
+]
 
 [dependency-groups]
 # PEP 735 dev group — installed by default on `uv sync`. Mirrors the
@@ -80,6 +89,7 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
     "build>=1.0",
+    "xlwt>=1.3",
 ]
 
 [project.scripts]

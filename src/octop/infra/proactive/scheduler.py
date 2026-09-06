@@ -17,14 +17,20 @@ import logging
 import random
 from datetime import UTC, datetime, time, timedelta
 from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 if TYPE_CHECKING:
+    from octop.infra.db.repos.agents import AgentRepo
     from octop.infra.db.repos.care_push import CarePushRepo
     from octop.infra.db.repos.proactive_care_config import (
         ProactiveCareConfigRepo,
     )
     from octop.infra.db.repos.sessions import SessionRepo
+    from octop.infra.db.repos.users import UserRepo
     from octop.infra.proactive.service import ProactiveCareService
+from octop.infra.users.preferences import get_timezone_from_preferences_json
+
+_UTC_TZ_NAME = "UTC"
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +48,7 @@ def compute_next_trigger(
     active_hours_end: str,
     min_interval_hours: int,
     max_interval_hours: int,
+    timezone_name: str = _UTC_TZ_NAME,
 ) -> datetime:
     """Compute the next trigger time.
 
@@ -57,27 +64,31 @@ def compute_next_trigger(
         active_hours_end: Active-hours end (HH:MM).
         min_interval_hours: Minimum interval (hours).
         max_interval_hours: Maximum interval (hours).
+        timezone_name: IANA timezone used for active-window check.
 
     Returns:
         The next trigger time (UTC).
     """
+    timezone = _resolve_timezone(timezone_name)
+
+    # Compute the random candidate using the configured local clock,
+    # then convert the result back to UTC for sleeping.
+    local_now = now.astimezone(timezone)
+
     # Pick a random interval (minute precision)
     interval_minutes = random.randint(
         min_interval_hours * 60,
         max_interval_hours * 60,
     )
-    candidate = now + timedelta(minutes=interval_minutes)
+    candidate = local_now + timedelta(minutes=interval_minutes)
 
     start_t = _parse_hhmm(active_hours_start)
     end_t = _parse_hhmm(active_hours_end)
 
-    # Check whether the candidate falls within active hours (compare hour/minute of local time)
-    # Note: we compare using the UTC time's hour/minute; a timezone conversion may be
-    # needed in real deployments, but since config has no timezone field we use UTC for now.
     candidate_t = candidate.time().replace(second=0, microsecond=0)
 
     if start_t <= candidate_t < end_t:
-        return candidate
+        return candidate.astimezone(UTC)
 
     # Outside active hours -> shift to next active-hours start + random(0, 120min)
     random_offset_minutes = random.randint(0, 120)
@@ -85,16 +96,16 @@ def compute_next_trigger(
     # Find the start of the next active-hours window
     # First try today's active_hours_start
     today = candidate.date()
-    today_start = datetime.combine(today, start_t, tzinfo=UTC)
+    today_start = datetime.combine(today, start_t, tzinfo=timezone)
     if today_start > candidate:
         # Today's active hours have not started yet; use today's
         next_start = today_start
     else:
         # Today's active hours have already passed; use tomorrow's
         tomorrow = today + timedelta(days=1)
-        next_start = datetime.combine(tomorrow, start_t, tzinfo=UTC)
+        next_start = datetime.combine(tomorrow, start_t, tzinfo=timezone)
 
-    return next_start + timedelta(minutes=random_offset_minutes)
+    return (next_start + timedelta(minutes=random_offset_minutes)).astimezone(UTC)
 
 
 def is_in_active_hours(
@@ -102,12 +113,22 @@ def is_in_active_hours(
     *,
     active_hours_start: str,
     active_hours_end: str,
+    timezone_name: str = _UTC_TZ_NAME,
 ) -> bool:
     """Check whether the current time is within the active hours."""
+    now = now.astimezone(_resolve_timezone(timezone_name))
     start_t = _parse_hhmm(active_hours_start)
     end_t = _parse_hhmm(active_hours_end)
     current_t = now.time().replace(second=0, microsecond=0)
     return start_t <= current_t < end_t
+
+
+def _resolve_timezone(timezone_name: str) -> ZoneInfo:
+    """Resolve timezone with UTC fallback."""
+    try:
+        return ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        return ZoneInfo(_UTC_TZ_NAME)
 
 
 class ProactiveCareScheduler:
@@ -127,12 +148,19 @@ class ProactiveCareScheduler:
         care_service: ProactiveCareService,
         config_repo: ProactiveCareConfigRepo,
         session_repo: SessionRepo,
+        agent_repo: AgentRepo | None = None,
+        user_repo: UserRepo | None = None,
+        default_timezone: str = _UTC_TZ_NAME,
     ) -> None:
         self._care_service = care_service
         self._config_repo = config_repo
         self._session_repo = session_repo
+        self._agent_repo = agent_repo
+        self._user_repo = user_repo
+        self._default_timezone = default_timezone
         # agent_id -> asyncio.Task
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._suspended = False
 
     def replace_persistence(
         self,
@@ -147,11 +175,32 @@ class ProactiveCareScheduler:
         self._care_service.replace_care_push_repo(care_push_repo)
 
     async def start_all(self) -> None:
-        """At system startup, register random scheduling tasks for all agents with enabled=true."""
+        """At system startup, register random scheduling tasks for all agents with enabled=true.
+
+        Includes agents that never saved a config row: proactive care defaults to on.
+        """
         configs = self._config_repo.list_enabled()
         logger.info("ProactiveCareScheduler: started, found %d enabled agents", len(configs))
         for cfg in configs:
-            self._schedule(cfg.agent_id)
+            self.ensure_scheduled(cfg.agent_id)
+
+    def suspend(self) -> None:
+        """Stop creating new loops. Tests call this so leftover sleeps do not hang pytest."""
+        self._suspended = True
+
+    def ensure_scheduled(self, agent_id: str) -> None:
+        """Start the loop if this agent is enabled and not already scheduled."""
+        if self._suspended:
+            return
+        if agent_id in self._tasks:
+            return
+        cfg = self._config_repo.get(agent_id)
+        if cfg.enabled:
+            self._schedule(agent_id)
+            logger.info(
+                "ProactiveCareScheduler: agent=%s scheduled (default enabled unless opted out)",
+                agent_id,
+            )
 
     def reschedule(self, agent_id: str) -> None:
         """Cancel the current schedule and re-arrange the next trigger time with new config.
@@ -182,14 +231,24 @@ class ProactiveCareScheduler:
             task.cancel()
 
     async def shutdown(self) -> None:
-        """Shut down all scheduling tasks."""
-        agent_ids = list(self._tasks.keys())
-        for agent_id in agent_ids:
-            self.cancel(agent_id)
+        """Cancel every loop and wait so a long sleep cannot outlive the process."""
+        pending: list[asyncio.Task[None]] = []
+        for agent_id in list(self._tasks.keys()):
+            task = self._tasks.pop(agent_id, None)
+            if task and not task.done():
+                task.cancel()
+                pending.append(task)
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
         logger.info("ProactiveCareScheduler: all scheduled tasks shut down")
 
     def _schedule(self, agent_id: str) -> None:
         """Create a scheduling task for an agent."""
+        if self._suspended:
+            return
+        existing = self._tasks.get(agent_id)
+        if existing is not None and not existing.done():
+            existing.cancel()
         task = asyncio.create_task(
             self._run_loop(agent_id),
             name=f"proactive_care_{agent_id}",
@@ -199,7 +258,8 @@ class ProactiveCareScheduler:
 
     def _on_task_done(self, agent_id: str, task: asyncio.Task[None]) -> None:
         """Task-completion callback that handles exceptions."""
-        self._tasks.pop(agent_id, None)
+        if self._tasks.get(agent_id) is task:
+            self._tasks.pop(agent_id, None)
         if task.cancelled():
             return
         exc = task.exception()
@@ -227,6 +287,7 @@ class ProactiveCareScheduler:
                 return
 
             now = datetime.now(UTC)
+            timezone_name = self._resolve_tz_for_agent(agent_id)
 
             # Compute the next trigger time
             next_trigger = compute_next_trigger(
@@ -235,13 +296,16 @@ class ProactiveCareScheduler:
                 active_hours_end=cfg.active_hours_end,
                 min_interval_hours=cfg.min_interval_hours,
                 max_interval_hours=cfg.max_interval_hours,
+                timezone_name=timezone_name,
             )
 
             wait_seconds = (next_trigger - now).total_seconds()
             logger.info(
                 "ProactiveCareScheduler: agent=%s next push at %s (waiting %.0f s)",
                 agent_id,
-                next_trigger.strftime("%Y-%m-%d %H:%M UTC"),
+                next_trigger.astimezone(_resolve_timezone(timezone_name)).strftime(
+                    "%Y-%m-%d %H:%M %Z"
+                ),
                 wait_seconds,
             )
 
@@ -274,6 +338,7 @@ class ProactiveCareScheduler:
                 now,
                 active_hours_start=cfg.active_hours_start,
                 active_hours_end=cfg.active_hours_end,
+                timezone_name=timezone_name,
             ):
                 logger.info(
                     "ProactiveCareScheduler: agent=%s current time outside active hours, skipping this push",
@@ -307,3 +372,25 @@ class ProactiveCareScheduler:
                     exc_info=exc,
                 )
             # Regardless of success or failure, continue to the next scheduling round
+
+    def _resolve_tz_for_agent(self, agent_id: str) -> str:
+        if self._agent_repo is None or self._user_repo is None:
+            return self._default_timezone
+
+        agent = self._agent_repo.get(agent_id)
+        if agent is None or agent.user_id is None:
+            return self._default_timezone
+
+        user = self._user_repo.get(agent.user_id)
+        if user is None:
+            return self._default_timezone
+
+        timezone_name = get_timezone_from_preferences_json(user.preferences_json)
+        if not timezone_name:
+            return self._default_timezone
+
+        try:
+            ZoneInfo(timezone_name)
+            return timezone_name
+        except ZoneInfoNotFoundError:
+            return self._default_timezone

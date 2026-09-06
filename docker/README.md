@@ -58,7 +58,7 @@ bash docker/docker_build.sh
 |----------|---------|-------------|
 | `HOME` | `/data` | Must be `/data` so `~/.octop` maps to the data volume |
 | `OCTOP_PORT` | `8088` | HTTP listen port |
-| `OCTOP_DEFAULT_PASSWORD` | `Octop123` | Initial admin password (≥8 chars, letters + digits) |
+| `OCTOP_DEFAULT_PASSWORD` | `Octop123` | First-run admin password (≥8 chars, letters + digits) |
 | `OCTOP_ADMIN_USERNAME` | `admin` | Initial admin username |
 | `OCTOP_DATABASE_URL` | — | PostgreSQL DSN (or other `OCTOP_DATABASE_*`; see [configuration.md](../docs/configuration.md)) |
 | `OCTOP_DATABASE_DRIVER` | — | `sqlite` \| `postgresql` when overriding defaults via env |

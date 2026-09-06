@@ -65,7 +65,7 @@ OPENAPI_TAGS: list[dict[str, str]] = [
     },
     {
         "name": "chat",
-        "description": "Dashboard chat: WebSocket streaming, threads, conversation history, and text-push toasts.",
+        "description": "Dashboard chat: WebSocket streaming, threads, conversation history, trajectory ledger, and text-push toasts.",
     },
     {
         "name": "slash",
@@ -141,7 +141,7 @@ OPENAPI_TAGS: list[dict[str, str]] = [
     {"name": "update", "description": "In-place server update checks and apply flow."},
     {
         "name": "browser",
-        "description": "Remote browser sessions: navigate, screenshot, live stream.",
+        "description": "Remote browser: env/install, harness sessions, live stream, record/replay.",
     },
     {
         "name": "mobile",

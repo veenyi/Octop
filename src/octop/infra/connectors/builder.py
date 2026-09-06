@@ -441,7 +441,7 @@ def _iter_active_connectors(
     connector_repo: Any,
     user_id: int,
 ) -> Any:
-    for inst in connector_repo.list_by_user(user_id):
+    for inst in connector_repo.list_visible(user_id):
         if inst.status != "active":
             continue
         entry = get_catalog_entry(inst.kind)
@@ -476,7 +476,7 @@ def build_mcp_server_configs_for_user(
             agent_id,
             agent_user_id,
             user_id,
-            len(connector_repo.list_by_user(user_id)),
+            len(connector_repo.list_visible(user_id)),
         )
     for inst, entry, creds in _iter_active_connectors(svc, connector_repo, user_id):
         try:
@@ -529,6 +529,23 @@ def build_mcp_server_configs_for_user(
     return configs
 
 
+def gateway_mcp_server_names(*, connector_repo: Any, user_id: int) -> set[str]:
+    """MCP server names of *user_id*'s active gateway-mode connector instances.
+
+    Gateway connectors carry no HTTP transport: their tools are built in-process
+    from stored credentials, so callers can attach them to a live agent instead
+    of rebuilding it.
+    """
+    names: set[str] = set()
+    for inst in connector_repo.list_visible(user_id):
+        if inst.status != "active":
+            continue
+        entry = get_catalog_entry(inst.kind)
+        if entry is not None and entry.mcp_mode == "gateway":
+            names.add(inst.mcp_server_name)
+    return names
+
+
 def inject_missing_gateway_tools(
     agent: Any,
     *,
@@ -564,7 +581,7 @@ def inject_missing_gateway_tools(
     if not extra:
         gateway_names = [
             inst.mcp_server_name
-            for inst in connector_repo.list_by_user(user_id)
+            for inst in connector_repo.list_visible(user_id)
             if inst.status == "active"
             and (entry := get_catalog_entry(inst.kind)) is not None
             and entry.mcp_mode == "gateway"

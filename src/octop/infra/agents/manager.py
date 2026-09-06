@@ -53,6 +53,7 @@ from octop.infra.backend.resolver import (
 )
 from octop.infra.connectors.builder import (
     build_mcp_server_configs_for_user,
+    gateway_mcp_server_names,
     inject_missing_gateway_tools,
 )
 from octop.infra.connectors.service import ConnectorService
@@ -71,6 +72,7 @@ if TYPE_CHECKING:
     from octop.infra.cron.manager import CronManager
     from octop.infra.db.repos.agents import AgentRow
     from octop.infra.db.services import RepoBundle
+    from octop.infra.proactive.scheduler import ProactiveCareScheduler
     from octop.infra.utils.paths import PathLayout
 
 logger = logging.getLogger(__name__)
@@ -333,6 +335,7 @@ class AgentManager:
         self._expert_catalog = expert_catalog
         self._plugin_manager = plugin_manager
         self._cron_manager: CronManager | None = None
+        self._proactive_scheduler: ProactiveCareScheduler | None = None
         self._team_processor: Any | None = None
         self._harness_manager: HarnessAgentManager | None = None
         self._lock = asyncio.Lock()
@@ -402,6 +405,10 @@ class AgentManager:
     def set_cron_manager(self, cron_manager: CronManager) -> None:
         """Attach the process-wide CronManager (must be set before boot())."""
         self._cron_manager = cron_manager
+
+    def set_proactive_scheduler(self, scheduler: ProactiveCareScheduler) -> None:
+        """Attach the process-wide proactive-care scheduler (optional; used after create/delete)."""
+        self._proactive_scheduler = scheduler
 
     def set_team_processor(self, team_processor: Any | None) -> None:
         """Attach harness TeamProcessor (GlobalProcessor); required before boot()."""
@@ -573,12 +580,16 @@ class AgentManager:
             else:
                 agent = await self._start_agent(row, init_workspace=True)
                 if agent is not None and spec.template_name:
+                    if self._spec_is_opensandbox(self._backend_spec_for_row(row)):
+                        await self._seed_expert_template(row, spec.template_name)
                     reload = getattr(agent, "reload_subagents", None)
                     if callable(reload):
                         await asyncio.to_thread(reload)
             self._repos.audit_repo.write(
                 actor=ACTOR_SYSTEM, action="agent.create", target=agent_id, payload=spec.name
             )
+            if self._proactive_scheduler is not None:
+                self._proactive_scheduler.ensure_scheduled(agent_id)
             return row
 
     def _preserve_system_files_path(self, agent_id: str, cfg: dict[str, Any]) -> dict[str, Any]:
@@ -678,6 +689,8 @@ class AgentManager:
         except OSError:
             logger.exception("rmtree failed for %s; agent removed from DB anyway", workspace_dir)
         self._repos.agent_repo.delete(agent_id)
+        if self._proactive_scheduler is not None:
+            self._proactive_scheduler.cancel(agent_id)
         self._repos.audit_repo.write(actor=ACTOR_SYSTEM, action="agent.delete", target=agent_id)
 
     async def start(self, agent_id: str) -> None:
@@ -1134,7 +1147,7 @@ class AgentManager:
         self._connector_user_override[agent_id] = uid
         try:
             svc = self._connector_svc
-            for inst in self._repos.connector_repo.list_by_user(uid):
+            for inst in self._repos.connector_repo.list_visible(uid):
                 if inst.status != "active":
                     continue
                 await svc.ensure_fresh_credentials(inst.instance_id, inst.kind)
@@ -1167,11 +1180,10 @@ class AgentManager:
 
     def mcp_server_labels_for_user(self, user_id: int) -> dict[str, str]:
         labels: dict[str, str] = {}
-        for inst in self._repos.connector_repo.list_by_user(user_id):
-            name = inst.mcp_server_name
-            labels[name] = (inst.display_name or name).strip() or name
-        for name in self._connector_svc.custom_harness_configs(user_id):
-            labels.setdefault(name, name)
+        for inst in self._connector_svc.list_instances_for_api(user_id):
+            name = str(inst["mcp_server_name"])
+            display_name = str(inst.get("display_name") or name)
+            labels[name] = display_name.strip() or name
         return labels
 
     def resolve_tool_display_name_for_chat(
@@ -1352,6 +1364,23 @@ class AgentManager:
                         continue
                 agent.config.mcp_server_configs[name] = dict(spec)
 
+        gateway_missing: list[str] = []
+        if builtin_missing and uid is not None:
+            gateway_names = gateway_mcp_server_names(
+                connector_repo=self._repos.connector_repo,
+                user_id=uid,
+            )
+            gateway_missing = [n for n in builtin_missing if n in gateway_names]
+            builtin_missing = [n for n in builtin_missing if n not in gateway_names]
+
+        if gateway_missing and uid is not None:
+            await self._attach_gateway_tools(
+                agent,
+                agent_id=agent_id,
+                user_id=uid,
+                server_names=gateway_missing,
+            )
+
         if builtin_missing:
             logger.info(
                 "Reloading agent %s MCP tools (builtin_missing=%s)",
@@ -1433,6 +1462,43 @@ class AgentManager:
                 still_missing,
             )
         return still_missing
+
+    async def _attach_gateway_tools(
+        self,
+        agent: HarnessAgent,
+        *,
+        agent_id: str,
+        user_id: int,
+        server_names: list[str],
+    ) -> None:
+        """Add gateway connector tools to the running agent without rebuilding it.
+
+        A rebuild would drop the harness instance (and with it the checkpointer
+        pool an in-flight turn still writes to) only to run the very same
+        in-process injection at the end of ``_post_start_agent``.
+        """
+        repo = self._repos.connector_repo
+        for inst in repo.list_visible(user_id):
+            if inst.status != "active" or inst.mcp_server_name not in server_names:
+                continue
+            try:
+                await self._connector_svc.ensure_fresh_credentials(inst.instance_id, inst.kind)
+            except Exception:
+                logger.exception(
+                    "prepare_chat_mcp agent=%s: credential refresh failed for %s",
+                    agent_id,
+                    inst.mcp_server_name,
+                )
+        inject_missing_gateway_tools(
+            agent,
+            svc=self._connector_svc,
+            connector_repo=repo,
+            user_id=user_id,
+            agent_id=agent_id,
+            mcp_server_configs=agent.config.mcp_server_configs,
+        )
+        for name in server_names:
+            agent.config.mcp_server_configs.setdefault(name, {})
 
     # ------------------------------------------------------------------
     # Settings persistence — push global policy into harness runtime
@@ -2018,7 +2084,12 @@ class AgentManager:
                 exc_info=True,
             )
         if self._plugin_manager is not None:
-            await asyncio.to_thread(self._plugin_manager.sync_skills_to_workspace, ws)
+            agent_plugins = self.get_config(row.agent_id).get("plugins")
+            await asyncio.to_thread(
+                self._plugin_manager.sync_skills_to_workspace,
+                ws,
+                agent_plugins=agent_plugins,
+            )
 
         # Patch config when bootstrap finishes, but defer graph recompile until
         # the in-flight turn has fully drained (sync _init_graph mid-stream segfaults).
@@ -2103,6 +2174,10 @@ class AgentManager:
             return None
         return owner.username or None
 
+    @staticmethod
+    def _spec_is_opensandbox(spec: Any) -> bool:
+        return isinstance(spec, dict) and str(spec.get("type") or "").lower() == "opensandbox"
+
     def _prepare_docker_backend(self, backend: Any, row: AgentRow) -> Any:
         """Inject Octop docker defaults (prefix / agent_id / username) without overwrite."""
         if not isinstance(backend, dict) or backend.get("type") != "docker":
@@ -2122,12 +2197,14 @@ class AgentManager:
         *,
         cfg: dict[str, Any] | None = None,
         workspace_dir: Path | None = None,
+        allow_ephemeral_remote: bool = False,
     ) -> Any:
         """Resolve :class:`BackendWorkspace` for *row* without a running harness agent."""
         from harness_agent.backends import resolve_backend  # noqa: PLC0415
         from harness_agent.backends.workspace import BackendWorkspace  # noqa: PLC0415
 
         from octop.infra.agents.workspace_dir import system_files_path_from_config  # noqa: PLC0415
+        from octop.infra.backend.opensandbox_deps import ensure_opensandbox_deps  # noqa: PLC0415
 
         if cfg is None:
             cfg = self._agent_config_dict(row)
@@ -2137,6 +2214,15 @@ class AgentManager:
             self._backend_spec_for_row(row, cfg=cfg, workspace_dir=workspace_dir),
             row,
         )
+        if self._spec_is_opensandbox(backend) and not allow_ephemeral_remote:
+            # Stopped-agent / seed fallback: do not create a throwaway remote sandbox.
+            backend = {
+                "type": "filesystem",
+                "root_dir": str(workspace_dir),
+                "virtual_mode": True,
+            }
+        elif self._spec_is_opensandbox(backend):
+            ensure_opensandbox_deps(allow_install=True)
         return BackendWorkspace(
             resolve_backend(backend, workspace_dir=workspace_dir),
             workspace_dir,
@@ -2171,7 +2257,23 @@ class AgentManager:
         if not expert.files and not (expert_dir / MANIFEST_FILENAME).is_file():
             return
 
-        workspace = self._backend_workspace_for_row(row)
+        if self._spec_is_opensandbox(self._backend_spec_for_row(row)):
+            if self._harness_manager is None:
+                logger.info(
+                    "Agent %s: skip expert template seed until runtime (ephemeral OpenSandbox)",
+                    row.agent_id,
+                )
+                return
+            try:
+                workspace = self._harness_manager.get_agent(row.agent_id).agent.workspace
+            except KeyError:
+                logger.info(
+                    "Agent %s: skip expert template seed until runtime (ephemeral OpenSandbox)",
+                    row.agent_id,
+                )
+                return
+        else:
+            workspace = self._backend_workspace_for_row(row)
         try:
             count = await seed_expert_directory(
                 expert_dir=expert_dir,
@@ -2338,7 +2440,12 @@ class AgentManager:
             cfg = self._agent_config_dict(row)
 
         backend = self._backend_spec_for_row(row, cfg=cfg, workspace_dir=workspace_dir)
-        ws = self._backend_workspace_for_row(row, cfg=cfg, workspace_dir=workspace_dir)
+        ws = self._backend_workspace_for_row(
+            row,
+            cfg=cfg,
+            workspace_dir=workspace_dir,
+            allow_ephemeral_remote=self._spec_is_opensandbox(backend),
+        )
 
         cron_tools: list[Any] | None = None
         if self._cron_manager is not None:
@@ -2371,6 +2478,7 @@ class AgentManager:
         from harness_agent.plugins import PluginRegistry, build_plugin_tools  # noqa: PLC0415
 
         from octop.infra.agents.plugin_tool_defaults import (  # noqa: PLC0415
+            agent_plugin_enabled,
             expand_plugin_tools_default_on,
         )
 
@@ -2378,16 +2486,20 @@ class AgentManager:
             self._plugin_manager.global_enabled_map() if self._plugin_manager is not None else {}
         )
         registered = [(reg.plugin_id, reg.name) for reg in PluginRegistry().all_tools()]
-        # Mount every globally-enabled plugin tool; per-agent ``enabled: false``
-        # is enforced via ``tools_disabled`` so toggles can hot-sync without reload.
+        agent_plugins = cfg.get("plugins")
+        agent_plugins_map = agent_plugins if isinstance(agent_plugins, dict) else {}
+        effective_plugins = dict(global_plugins)
+        for plugin in PluginRegistry().list_plugins():
+            if not agent_plugin_enabled(agent_plugins_map, plugin.manifest.id):
+                effective_plugins[plugin.manifest.id] = False
         mount_plugins = expand_plugin_tools_default_on(
-            None,
+            agent_plugins_map,
             registered_tools=registered,
-            global_plugins=global_plugins,
+            global_plugins=effective_plugins,
         )
         plugin_tools = build_plugin_tools(
             agent_plugins=mount_plugins,
-            global_plugins=global_plugins,
+            global_plugins=effective_plugins,
         )
         # Plugin authors may register tools with non-ASCII (e.g. Chinese) names,
         # which strict LLM tool-name APIs reject. Rewrite them to legal names
@@ -2410,12 +2522,15 @@ class AgentManager:
             for tool in plugin_tools
             if (label := extract_original_plugin_label(str(getattr(tool, "description", "") or "")))
         }
-        plugin_middleware = PluginRegistry().build_middleware_chain(global_enabled=global_plugins)
+        plugin_middleware = PluginRegistry().build_middleware_chain(
+            global_enabled=effective_plugins
+        )
         global_policy = self._security.harness_policy()
         agent_override = cfg.get("security") if isinstance(cfg.get("security"), dict) else None
         policy = SecurityPolicy.merge(global_policy, agent_override)
 
         from octop.infra.agents.middleware.binary_read_guard import BinaryReadGuardMiddleware
+        from octop.infra.agents.middleware.browser_profile import BrowserProfileMiddleware
         from octop.infra.agents.middleware.reasoning import ReasoningRequestMiddleware
         from octop.infra.agents.middleware.thread_artifacts import ThreadArtifactsMiddleware
         from octop.infra.agents.middleware.workspace_image import (
@@ -2431,6 +2546,7 @@ class AgentManager:
             *plugin_middleware,
             ReasoningRequestMiddleware(),
             KnowledgeSearchHintMiddleware(),
+            BrowserProfileMiddleware(),
             BinaryReadGuardMiddleware(),
             WorkspaceImageMaterializeMiddleware(workspace=ws),
             ThreadArtifactsMiddleware(
@@ -2505,6 +2621,17 @@ class AgentManager:
             else []
         )
         skill_dirs = configured_skill_dirs + package_skill_dirs
+        plugin_skills_disabled: set[str] = set()
+        if self._plugin_manager is not None:
+            for plugin_item in self._plugin_manager.list_installed():
+                plugin_id = str(plugin_item.get("id") or "")
+                if plugin_id and (
+                    plugin_item.get("enabled", True) is False
+                    or not agent_plugin_enabled(agent_plugins_map, plugin_id)
+                ):
+                    plugin_skills_disabled.update(
+                        self._plugin_manager.plugin_skill_names(plugin_id)
+                    )
 
         from octop.infra.agents.execute_env import inject_agent_execute_env  # noqa: PLC0415
 
@@ -2515,6 +2642,9 @@ class AgentManager:
             workspace_dir=workspace_dir,
             cfg=cfg,
         )
+        # OpenSandbox.create is not idempotent — reuse the instance already
+        # wrapped by ``ws`` so start does not spawn a second remote sandbox.
+        harness_backend: Any = ws.backend if self._spec_is_opensandbox(backend) else backend
 
         harness_cfg = HarnessAgentConfig(
             name=_memory_namespace(row.agent_id),
@@ -2531,14 +2661,14 @@ class AgentManager:
             ),
             system_prompt=system_prompt,
             memory=memory,
-            backend=backend,  # resolved spec; harness re-resolves to a runtime instance
+            backend=harness_backend,  # spec, or live OpenSandbox instance
             mcp_server_configs=mcp_server_configs,
             tools=merged_tools or None,
             middleware=agent_middleware or None,
             bootstrap_enabled=True,
             acp_runners=acp_config.runners,
             acp_delegate_enabled=bool(acp_raw.get("tool_enabled", False)),
-            skills_disabled=frozenset(skills_disabled_set(cfg)),
+            skills_disabled=frozenset(skills_disabled_set(cfg) | plugin_skills_disabled),
             skills_dir=skill_dirs or None,
             default_timezone=self._config.default_timezone,
             log_dir=str(self.paths.logs_dir),

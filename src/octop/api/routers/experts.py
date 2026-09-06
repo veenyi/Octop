@@ -21,6 +21,10 @@ from octop.api.common.agent import require_agent_owner_row, user_owns_agent
 from octop.api.common.agent_runtime import AgentRuntimeFields, runtime_field_updates
 from octop.api.common.validators import assert_user_backend_root_dirs
 from octop.api.deps import current_user, get_server
+from octop.infra.agents.avatar import (
+    display_published_expert_icon_url,
+    read_snapshot_avatar,
+)
 from octop.infra.agents.experts.catalog import (
     MANIFEST_FILENAME,
     build_create_spec_from_expert,
@@ -59,6 +63,7 @@ from octop.infra.agents.experts.skillhub_market import (
     fetch_skillset,
 )
 from octop.infra.errors import ErrorCode, OctopError
+from octop.infra.trajectory.settings import apply_enable_trajectory
 from octop.infra.utils.locale import resolve_user_locale
 
 router = APIRouter()
@@ -89,6 +94,7 @@ class FromExpertBody(AgentRuntimeFields):
         description="Optional custom agent id; auto-generated when omitted",
     )
     welcome_message: str | None = None
+    enable_trajectory: bool = True
 
 
 class PublishExpertBody(BaseModel):
@@ -122,6 +128,7 @@ class InstallPublishedExpertBody(AgentRuntimeFields):
         description="Optional custom agent id; auto-generated when omitted",
     )
     welcome_message: str | None = None
+    enable_trajectory: bool = True
 
 
 class LocalizedTextResponse(BaseModel):
@@ -282,6 +289,7 @@ def _published_creator_username(server: Any, created_by: str) -> str | None:
 
 
 def _published_summary_dict(row: Any, server: Any) -> dict[str, Any]:
+    snapshot_dir = _published_snapshot_dir(server, row.id)
     return {
         "id": row.id,
         "slug": row.slug,
@@ -291,6 +299,11 @@ def _published_summary_dict(row: Any, server: Any) -> dict[str, Any]:
         "creator_username": _published_creator_username(server, row.created_by),
         "source_agent_id": row.source_agent_id,
         "icon_name": row.icon_name or None,
+        "icon_url": display_published_expert_icon_url(
+            expert_id=row.id,
+            snapshot_dir=snapshot_dir,
+            updated_at=row.updated_at,
+        ),
         "color": row.color or None,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
@@ -312,6 +325,24 @@ async def list_published_experts(
         _published_summary_dict(row, server)
         for row in server.services.published_expert_repo.list_all()
     ]
+
+
+@router.get(
+    "/experts/published/{expert_id}/avatar",
+    summary="Fetch published expert avatar",
+)
+async def get_published_expert_avatar(
+    expert_id: str,
+    _: Any = Depends(current_user),
+    server: Any = Depends(get_server),
+) -> Response:
+    """Return the avatar bytes baked into the published snapshot, if any."""
+    row = _require_published_expert(server, expert_id)
+    found = read_snapshot_avatar(_published_snapshot_dir(server, row.id))
+    if found is None:
+        raise OctopError(ErrorCode.NOT_FOUND, "avatar not uploaded")
+    data, media_type = found
+    return Response(content=data, media_type=media_type)
 
 
 @router.get("/experts/published/{expert_id}", summary="Get published expert template detail")
@@ -468,6 +499,7 @@ async def install_published_expert(
             agent_id=body.agent_id,
             welcome_message=body.welcome_message,
             runtime_config=runtime_field_updates(body, exclude_unset=True),
+            enable_trajectory=body.enable_trajectory,
         ),
     )
 
@@ -558,6 +590,7 @@ async def install_expert_hub_item(
                 agent_id=body.agent_id,
                 welcome_message=body.welcome_message,
                 skill_package_ids=package_ids,
+                enable_trajectory=body.enable_trajectory,
                 **runtime_field_updates(body, exclude_unset=False),
             ),
         )
@@ -627,6 +660,7 @@ async def create_agent_from_expert(
         config_extra["providers"] = list(body.providers)
     if body.backend:
         config_extra["backend"] = body.backend
+    apply_enable_trajectory(config_extra, body.enable_trajectory)
 
     locale = resolve_user_locale(
         user_repo=server.services.user_repo,

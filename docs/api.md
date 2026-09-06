@@ -119,6 +119,16 @@ because each request is a one-shot continuation.
 | `DELETE` | `/agents/{id}/chat/sessions/{thread_id}` | owner | `204` (archives the active row) |
 | `GET`    | `/agents/{id}/chat/sessions/{thread_id}/history` | owner | paginated message history; `turn_active` tells a reconnecting client whether to re-`subscribe` over the chat WebSocket |
 
+### Trajectory ledger
+
+| Method | Path | Auth | Notes |
+|--------|------|------|-------|
+| `GET` | `/agents/{id}/threads/{thread_id}/trajectory` | owner | paginated event summaries; use `before_seq` for older rows |
+| `GET` | `/agents/{id}/threads/{thread_id}/trajectory/events/{event_id}` | owner | full event payload |
+| `GET` | `/agents/{id}/threads/{thread_id}/trajectory/metrics` | owner | aggregated turn, timing, and token metrics |
+| `GET` | `/agents/{id}/threads/{thread_id}/trajectory/stream` | owner | live SSE events; resume with `after_seq` or `Last-Event-ID` |
+| `GET` | `/agents/{id}/threads/{thread_id}/trajectory/export` | owner | full ledger download as JSONL (default) or JSON |
+
 ## Channels
 
 | Method | Path | Auth | Notes |
@@ -143,19 +153,20 @@ because each request is a one-shot continuation.
 | `GET`    | `/settings/timezone` | user | process-level `{timezone}` from `default_timezone` |
 | `GET`    | `/settings/upload` | user | `{max_upload_mb, max_upload_bytes}` from `max_upload_mb` |
 | `GET`    | `/cron/settings` | user | compat alias of `/settings/timezone` |
-| `GET`    | `/agents/{aid}/cron` | owner | list of cron rows |
-| `POST`   | `/agents/{aid}/cron` | owner | body `{trigger, prompt, session_key?, fresh_thread?, model?, task_type?}` → `201` |
-| `GET`    | `/agents/{aid}/cron/{cid}` | owner | cron row |
-| `PATCH`  | `/agents/{aid}/cron/{cid}` | owner | body subset → updated row |
-| `DELETE` | `/agents/{aid}/cron/{cid}` | owner | `204` |
-| `POST`   | `/agents/{aid}/cron/{cid}/run-now` | owner | `204` (fire immediately, off-schedule) |
+| `GET`    | `/agents/{aid}/cron` | owner only | list cron rows; non-owners (including admin) get `[]` |
+| `POST`   | `/agents/{aid}/cron` | owner only | body `{name?, trigger, prompt, session_key?, fresh_thread?, enabled?, model?, task_type?}` → `201` |
+| `GET`    | `/agents/{aid}/cron/{cid}` | owner only | cron row |
+| `PATCH`  | `/agents/{aid}/cron/{cid}` | owner only | body subset → updated row |
+| `DELETE` | `/agents/{aid}/cron/{cid}` | owner only | `204` |
+| `POST`   | `/agents/{aid}/cron/{cid}/run-now` | owner only | `204` (fire immediately, off-schedule) |
 
 `task_type` is `"text"` (push prompt directly to the session) or
 `"agent"` (run the prompt through the LLM and push the reply).
 Default: `"agent"`. `trigger` accepts cron expressions
 (`"0 9 * * *"`) plus the `interval:N` / `date:ISO8601` aliases
 documented in `infra/cron/trigger.py`. `prompt` must be non-empty and
-≤ 2000 characters.
+≤ 2000 characters. `name` is an optional display label; when omitted,
+the server derives one from `prompt`.
 
 ## Providers
 
@@ -363,8 +374,8 @@ endpoint (public, mounted directly in `api/app.py`).
 |--------|------|------|-------|
 | `WS`/`POST`/`GET`/… | `/agents/{aid}/terminal` | owner | AI-assisted remote PTY |
 | `GET` | `/agents/{aid}/terminal/context` | owner | recent terminal context for the AI helper |
-| `WS`/`POST`/`GET`/… | `/browser/...` | user | remote Playwright sessions, screenshots, live streams |
-| `POST` | `/browser/shutdown` | user | stop the local Chrome process for a harness profile (`?profile=`) |
+| `WS`/`POST`/`GET`/… | `/browser/...` | user | harness-browser sessions, live stream, record/replay |
+| `POST` | `/browser/shutdown` | user | stop the current user's Octop-managed Chrome |
 | `POST` | `/agents/{aid}/upload` | user | multipart upload → `{workspace}/inbound/` |
 | `POST` | `/agents/{aid}/files/access-urls` | user | refresh inbound media URLs (signed) |
 | `GET`  | `/agents/{aid}/files/{path}` | owner | read an inbound file |

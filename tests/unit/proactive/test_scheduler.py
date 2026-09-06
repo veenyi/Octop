@@ -15,6 +15,7 @@ import asyncio
 from datetime import UTC, datetime, time
 from pathlib import Path
 from unittest.mock import AsyncMock
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -156,6 +157,20 @@ def test_is_in_active_hours_false_after():
     assert is_in_active_hours(now, active_hours_start="09:00", active_hours_end="22:00") is False
 
 
+def test_is_in_active_hours_with_timezone():
+    # 2026-07-01 01:00 UTC is 09:00 Asia/Shanghai.
+    now = datetime(2026, 7, 1, 1, 0, 0, tzinfo=UTC)
+    assert (
+        is_in_active_hours(
+            now,
+            active_hours_start="09:00",
+            active_hours_end="22:00",
+            timezone_name="Asia/Shanghai",
+        )
+        is True
+    )
+
+
 def test_is_in_active_hours_boundary_start():
     """Should return True exactly at the active-window start."""
     now = datetime(2026, 7, 1, 9, 0, 0, tzinfo=UTC)
@@ -166,6 +181,22 @@ def test_is_in_active_hours_boundary_end():
     """Should return False exactly at the active-window end."""
     now = datetime(2026, 7, 1, 22, 0, 0, tzinfo=UTC)
     assert is_in_active_hours(now, active_hours_start="09:00", active_hours_end="22:00") is False
+
+
+def test_compute_next_trigger_with_timezone():
+    now = datetime(2026, 7, 1, 1, 0, 0, tzinfo=UTC)  # 09:00 Shanghai
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("random.randint", lambda a, b: 60)  # 1 hour
+        result = compute_next_trigger(
+            now=now,
+            active_hours_start="09:00",
+            active_hours_end="22:00",
+            min_interval_hours=1,
+            max_interval_hours=2,
+            timezone_name="Asia/Shanghai",
+        )
+    local = result.astimezone(ZoneInfo("Asia/Shanghai"))
+    assert local.time().hour == 10
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +260,27 @@ def test_config_repo_list_enabled(db: SqlitePool, config_repo: ProactiveCareConf
     enabled_ids = {c.agent_id for c in enabled}
     assert aid1 in enabled_ids
     assert aid2 not in enabled_ids
+
+
+def test_config_repo_list_enabled_includes_default_on_agents(
+    db: SqlitePool, config_repo: ProactiveCareConfigRepo
+):
+    """Agents with no config row default to enabled and must be scheduled."""
+    uid = UserRepo(db).create(username="carol", password_hash="h", role="admin")
+    aid_default = new_ulid()
+    aid_off = new_ulid()
+    AgentRepo(db).create(agent_id=aid_default, user_id=uid, name="default-on")
+    AgentRepo(db).create(agent_id=aid_off, user_id=uid, name="opted-out")
+    config_repo.upsert(ProactiveCareConfig(agent_id=aid_off, enabled=False))
+
+    enabled = config_repo.list_enabled()
+    enabled_ids = {c.agent_id for c in enabled}
+    assert aid_default in enabled_ids
+    assert aid_off not in enabled_ids
+    default_cfg = next(c for c in enabled if c.agent_id == aid_default)
+    assert default_cfg.enabled is True
+    assert default_cfg.min_interval_hours == 5
+    assert default_cfg.max_interval_hours == 24
 
 
 # ---------------------------------------------------------------------------
@@ -314,3 +366,63 @@ async def test_scheduler_start_all_no_enabled(
     )
     await scheduler.start_all()
     assert len(scheduler._tasks) == 0
+
+
+@pytest.mark.asyncio
+async def test_scheduler_start_all_includes_default_on_agent(
+    agent_id: str,
+    config_repo: ProactiveCareConfigRepo,
+    db: SqlitePool,
+):
+    """start_all should schedule agents that never saved a proactive-care row."""
+    from octop.infra.db.repos.sessions import SessionRepo
+
+    care_service = AsyncMock()
+    scheduler = ProactiveCareScheduler(
+        care_service=care_service,
+        config_repo=config_repo,
+        session_repo=SessionRepo(db),
+    )
+    await scheduler.start_all()
+    assert agent_id in scheduler._tasks
+    scheduler.cancel(agent_id)
+    await asyncio.sleep(0.01)
+
+
+@pytest.mark.asyncio
+async def test_shutdown_cancels_long_sleep_quickly(
+    agent_id: str,
+    config_repo: ProactiveCareConfigRepo,
+    db: SqlitePool,
+) -> None:
+    """A default-on loop sleeps for hours; shutdown must not wait that out."""
+    from octop.infra.db.repos.sessions import SessionRepo
+
+    scheduler = ProactiveCareScheduler(
+        care_service=AsyncMock(),
+        config_repo=config_repo,
+        session_repo=SessionRepo(db),
+    )
+    scheduler.ensure_scheduled(agent_id)
+    assert agent_id in scheduler._tasks
+    await asyncio.wait_for(scheduler.shutdown(), timeout=2)
+    assert scheduler._tasks == {}
+
+
+@pytest.mark.asyncio
+async def test_suspend_skips_new_schedules(
+    agent_id: str,
+    config_repo: ProactiveCareConfigRepo,
+    db: SqlitePool,
+) -> None:
+    from octop.infra.db.repos.sessions import SessionRepo
+
+    scheduler = ProactiveCareScheduler(
+        care_service=AsyncMock(),
+        config_repo=config_repo,
+        session_repo=SessionRepo(db),
+    )
+    scheduler.suspend()
+    scheduler.ensure_scheduled(agent_id)
+    await scheduler.start_all()
+    assert scheduler._tasks == {}

@@ -5,7 +5,7 @@ import {
   pathPermissionKeys,
   PERM,
 } from "../utils/permissions";
-import { isWorkbenchPath } from "./index";
+import { isWorkbenchPath, resolveSelectedKey, routeConfigs } from "./index";
 
 describe("pathPermissionKeys", () => {
   it("matches workbench and legacy aliases", () => {
@@ -42,6 +42,16 @@ describe("pathPermissionKeys", () => {
     expect([...PERM.advancedPage]).not.toContain("sso");
     expect(NAV_PERMISSIONS["admin-users"]).toEqual(PERM.usersPage);
     expect(NAV_PERMISSIONS["admin-advanced"]).toEqual(PERM.advancedPage);
+  });
+
+  it("keeps voice and search on models page, not advanced", () => {
+    expect(pathPermissionKeys("/admin/models")).toEqual([...PERM.modelsPage]);
+    expect(pathPermissionKeys("/admin/voice")).toEqual([...PERM.modelsPage]);
+    expect([...PERM.modelsPage]).toContain("voice");
+    expect([...PERM.modelsPage]).toContain("search");
+    expect([...PERM.advancedPage]).not.toContain("voice");
+    expect([...PERM.advancedPage]).not.toContain("search");
+    expect(NAV_PERMISSIONS.models).toEqual(PERM.modelsPage);
   });
 
   it("does not gate common pages", () => {
@@ -99,5 +109,15 @@ describe("pathPermissionKeys", () => {
         "/admin/advanced",
       ),
     ).toBe(false);
+  });
+});
+
+describe("unknown dashboard paths", () => {
+  it("do not highlight a sidebar item", () => {
+    expect(resolveSelectedKey("/does-not-exist")).toBe("");
+  });
+
+  it("are caught by the not-found route", () => {
+    expect(routeConfigs.some((rc) => rc.path === "*")).toBe(true);
   });
 });
