@@ -256,6 +256,14 @@ do not collapse host abs before calling BackendWorkspace.
 | ``docker`` | 容器内**同名绝对路径**（不 bind-mount） | 同上 |
 | 对象存储等 | 远端对象；本地物化/缓存按 backend | 同上 |
 
+自动压缩与 `/compact` 把被挤出的原文写到
+``{artifacts_root}/conversation_history/{session_id}.md``。本地
+``local_shell`` / ``filesystem`` 经 harness ``MountedCompositeBackend`` 把
+``artifacts_root`` 收到工作区（Octop：``.octop/conversation_history/``）。
+``docker`` / ``opensandbox`` / COS 等**没有**这层 wrap：offload 可能落到
+容器内 ``/conversation_history/``。自动压缩在写失败时仍继续摘要
+（``file_path=None``）；``/compact`` 写失败则整次失败，不改对话状态。
+
 Harness 侧只认调用方传入的 ``workspace_dir``；Docker 默认把它镜像成容器内工作区根。
 
 ### 直接写在 agent `config_json.backend`

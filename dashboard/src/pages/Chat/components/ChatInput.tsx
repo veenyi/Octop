@@ -341,6 +341,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
       slashPickerGroups,
       slashMenuItems,
       mentionItems,
+      filesLoading,
+      filesError,
       runSlashCommand,
       matchSlashCommand,
       handleMentionSelect,
@@ -742,12 +744,14 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
             )}
           </div>
 
-          {mentionMenuOpen && mentionItems.length > 0 && (
+          {mentionMenuOpen && (
             <MentionPickerMenu
+              items={mentionItems}
               query={mentionQuery}
-              connectors={availableConnectors ?? []}
               agents={mentionAgents}
               subagents={availableSubagents}
+              filesLoading={filesLoading}
+              filesError={filesError}
               activeIndex={mentionMenuIndex}
               onSelect={handleMentionSelect}
               onHover={setMentionMenuIndex}

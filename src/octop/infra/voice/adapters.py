@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import struct
 import uuid
 from collections.abc import AsyncIterator
@@ -13,6 +14,7 @@ from typing import Any
 import httpx
 
 from octop.infra.db.repos.voice_providers import VoiceProviderRow
+from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.utils.ssrf_guard import validate_https_url_resolved
 from octop.infra.voice.tencent_sign import tc3_headers
 
@@ -41,14 +43,29 @@ def _parse_tencent_credentials(row: VoiceProviderRow) -> tuple[str, str]:
 
 
 def _voice_format(mime: str) -> str:
+    """Map an upload MIME type onto a Tencent ASR ``VoiceFormat`` token."""
     lowered = mime.lower()
-    if "webm" in lowered:
-        return "webm"
-    if "ogg" in lowered:
-        return "ogg-opus"
     if "mp3" in lowered or "mpeg" in lowered:
         return "mp3"
-    return "wav"
+    if "wav" in lowered:
+        return "wav"
+    if "ogg" in lowered:
+        return "ogg-opus"
+    if "mp4" in lowered or "m4a" in lowered or "aac" in lowered:
+        return "m4a"
+    if "amr" in lowered:
+        return "amr"
+    if "silk" in lowered:
+        return "silk"
+    if "speex" in lowered:
+        return "speex"
+    if "pcm" in lowered:
+        return "pcm"
+    raise OctopError(
+        ErrorCode.VOICE_KIND_UNSUPPORTED,
+        f"unsupported audio format {mime!r}",
+        details={"mime": mime},
+    )
 
 
 async def transcribe_browser() -> STTResult:
@@ -298,7 +315,11 @@ def _mimo_audio_mime(mime: str) -> str:
         return "audio/wav"
     if "mp3" in lowered or "mpeg" in lowered:
         return "audio/mpeg"
-    raise ValueError(f"Mimo STT only supports wav and mp3 audio formats (received {mime!r})")
+    raise OctopError(
+        ErrorCode.VOICE_KIND_UNSUPPORTED,
+        f"unsupported audio format {mime!r}",
+        details={"mime": mime},
+    )
 
 
 async def transcribe_mimo(
@@ -427,13 +448,70 @@ async def synthesize_mimo(
                 yield pcm
 
 
+_PROBE_TONE_RATE = 16000
+_PROBE_TONE_SECONDS = 1.0
+
+
+def _probe_tone_wav() -> bytes:
+    """Deterministic probe payload: 1s 440Hz tone as 16kHz mono PCM16 WAV."""
+    n = int(_PROBE_TONE_RATE * _PROBE_TONE_SECONDS)
+    pcm = struct.pack(
+        f"<{n}h",
+        *[int(1000 * math.sin(2 * math.pi * 440 * i / _PROBE_TONE_RATE)) for i in range(n)],
+    )
+    return _wav_header(len(pcm), _PROBE_TONE_RATE) + pcm
+
+
+def _missing_credentials(row: VoiceProviderRow, kind: str) -> str | None:
+    """Probe-time credential check; returns an error message when incomplete."""
+    if kind == "tencent":
+        try:
+            _parse_tencent_credentials(row)
+        except ValueError as exc:
+            return str(exc)
+        return None
+    if kind in {"openai", "mimo"} and not row.api_key:
+        return "API credentials missing"
+    return None
+
+
+def _probe_failure(exc: Exception) -> dict[str, Any]:
+    """Turn a probe-time exception into an ``ok: false`` payload instead of a 500."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        detail = f"provider returned HTTP {exc.response.status_code}"
+    elif isinstance(exc, httpx.HTTPError):
+        detail = f"network error: {type(exc).__name__}"
+    else:
+        detail = str(exc).strip() or type(exc).__name__
+    return {"ok": False, "error": detail}
+
+
+async def _drain(stream: AsyncIterator[bytes]) -> list[bytes]:
+    return [part async for part in stream]
+
+
 async def test_stt(row: VoiceProviderRow | None, kind: str) -> dict[str, Any]:
     if kind == "browser":
         return {"ok": True, "mode": "browser"}
     if row is None:
         return {"ok": False, "error": "provider not configured"}
-    if not row.api_key and kind in {"openai", "tencent", "mimo"}:
-        return {"ok": False, "error": "API credentials missing"}
+    if kind not in {"openai", "tencent", "mimo"}:
+        # edge is TTS-only and unknown kinds have no adapter: keep offline pass.
+        return {"ok": True, "mode": kind}
+    missing = _missing_credentials(row, kind)
+    if missing:
+        return {"ok": False, "error": missing}
+    transcribe = (
+        transcribe_mimo
+        if kind == "mimo"
+        else transcribe_openai
+        if kind == "openai"
+        else transcribe_tencent
+    )
+    try:
+        await transcribe(row, _probe_tone_wav(), mime="audio/wav", language="zh-CN")
+    except Exception as exc:  # probe reports failures, never 500s
+        return _probe_failure(exc)
     return {"ok": True, "mode": kind}
 
 
@@ -441,33 +519,29 @@ async def test_tts(row: VoiceProviderRow | None, kind: str) -> dict[str, Any]:
     if kind == "browser":
         return {"ok": True, "mode": "browser"}
     if kind == "edge":
-        chunks: list[bytes] = []
-        async for part in synthesize_edge(
-            row
-            or VoiceProviderRow(
-                id=0,
-                name="edge",
-                kind="edge",
-                capability="tts",
-                base_url=None,
-                api_key=None,
-                extra_json=None,
-                note=None,
-                enabled=1,
-                created_at=0,
-                updated_at=0,
-            ),
-            "ping",
-            voice_id=None,
-            speed=1.0,
-        ):
-            chunks.append(part)
+        edge_row = row or VoiceProviderRow(
+            id=0,
+            name="edge",
+            kind="edge",
+            capability="tts",
+            base_url=None,
+            api_key=None,
+            extra_json=None,
+            note=None,
+            enabled=1,
+            created_at=0,
+            updated_at=0,
+        )
+        try:
+            chunks = await _drain(synthesize_edge(edge_row, "ping", voice_id=None, speed=1.0))
+        except Exception as exc:  # probe reports failures, never 500s
+            return _probe_failure(exc)
         return {"ok": bool(chunks), "bytes": sum(len(c) for c in chunks)}
     if row is None:
         return {"ok": False, "error": "provider not configured"}
-    if not row.api_key and kind in {"openai", "tencent", "mimo"}:
-        return {"ok": False, "error": "API credentials missing"}
-    chunks = []
+    missing = _missing_credentials(row, kind)
+    if missing:
+        return {"ok": False, "error": missing}
     synth = (
         synthesize_mimo
         if kind == "mimo"
@@ -475,6 +549,8 @@ async def test_tts(row: VoiceProviderRow | None, kind: str) -> dict[str, Any]:
         if kind == "openai"
         else synthesize_tencent
     )
-    async for part in synth(row, "ping", voice_id=None, speed=1.0):
-        chunks.append(part)
+    try:
+        chunks = await _drain(synth(row, "ping", voice_id=None, speed=1.0))
+    except Exception as exc:  # probe reports failures, never 500s
+        return _probe_failure(exc)
     return {"ok": bool(chunks), "bytes": sum(len(c) for c in chunks)}

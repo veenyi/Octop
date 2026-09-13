@@ -103,6 +103,8 @@ vi.mock("../hooks/useSlashMentionInput", () => ({
     slashPickerGroups: [],
     slashMenuItems: [],
     mentionItems: [],
+    filesLoading: false,
+    filesError: null,
     runSlashCommand: vi.fn(),
     matchSlashCommand: () => null,
     handleMentionSelect: vi.fn(),

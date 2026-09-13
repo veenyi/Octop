@@ -205,6 +205,7 @@ class GlobalProcessor:
             session_key=session_key,
             metadata=metadata,
             paths=self._agent_manager.paths,
+            default_timezone=self._agent_manager.octop_config.default_timezone,
         )
 
     @staticmethod

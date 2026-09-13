@@ -10,6 +10,7 @@ from pathlib import Path
 
 import click
 
+from octop.config import env_bind_overrides
 from octop.infra.utils.paths import PathLayout
 
 
@@ -82,6 +83,17 @@ def _load_configfile_overrides() -> tuple[str | None, int | None]:
                 port if isinstance(port, int) and not isinstance(port, bool) else None,
             )
     return None, None
+
+
+def resolve_bind(host: str | None, port: int | None) -> tuple[str | None, int | None]:
+    """Resolve the uvicorn bind address: CLI flag > env > config.json."""
+    cfg_host, cfg_port = _load_configfile_overrides()
+    env_host, env_port = env_bind_overrides()
+    # Use ``is not None`` (not ``or``) so falsy-but-valid values like port=0
+    # (OS-assigned random port) and host="0" are not silently overridden.
+    resolved_host = host if host is not None else env_host if env_host is not None else cfg_host
+    resolved_port = port if port is not None else env_port if env_port is not None else cfg_port
+    return resolved_host, resolved_port
 
 
 def _atomic_write_json(path: Path, data: dict[str, object]) -> None:
@@ -163,17 +175,13 @@ def run(
     """Run octop-server in the foreground.
 
     Host and port are resolved with the following precedence: explicit CLI
-    flags > ``~/.octop/config.json`` > launch defaults. When ``--host`` or
-    ``--port`` is passed on the CLI, that override is persisted to
-    ``config.json`` immediately before uvicorn starts.
+    flags > ``OCTOP_BIND_HOST``/``OCTOP_PORT`` env > ``~/.octop/config.json``
+    > launch defaults. When ``--host`` or ``--port`` is passed on the CLI,
+    that override is persisted to ``config.json`` immediately before uvicorn
+    starts.
     """
     cli_host, cli_port = host, port
-    cfg_host, cfg_port = _load_configfile_overrides()
-    # Use ``is not None`` (not ``or``) so falsy-but-valid values like port=0
-    # (OS-assigned random port) and host="0" are not silently overridden by
-    # the config-file fallback.
-    host = host if host is not None else cfg_host
-    port = port if port is not None else cfg_port
+    host, port = resolve_bind(host, port)
     if cli_host is not None or cli_port is not None:
         _save_configfile_overrides(cli_host, cli_port)
     certfile, keyfile = _maybe_generate_self_signed(ssl, ssl_certfile, ssl_keyfile)

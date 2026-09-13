@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { SlashCommandSpec } from "../../../api/modules/slash";
 import { resolveSlashIcon } from "../../../utils/slashIcons";
@@ -8,6 +8,7 @@ import type { ChatAgentOption } from "../components/ExpertAgentAvatar";
 import type { AgentSubagentSummary } from "../../../api/modules/subagents";
 import {
   buildMentionItems,
+  firstFileMentionIndex,
   type MentionPick,
 } from "../components/MentionPickerMenu";
 import { getMentionAtCursor } from "../utils/mentionAtCursor";
@@ -17,6 +18,11 @@ import {
   slashCommandPrefillText,
 } from "../../../utils/quickInputPrefill";
 import { replaceMentionQuery } from "../utils/expertMention";
+import {
+  isPathLikeMentionQuery,
+  replaceFileMentionQuery,
+} from "../utils/fileMention";
+import { useWorkspaceFileMention } from "./useWorkspaceFileMention";
 
 export type SlashMenuItem = {
   command: string;
@@ -90,6 +96,12 @@ export function useSlashMentionInput({
     [availableExperts, agentId],
   );
 
+  const {
+    files: mentionFiles,
+    loading: filesLoading,
+    error: filesError,
+  } = useWorkspaceFileMention(agentId, mentionMenuOpen, mentionQuery);
+
   const mentionItems = useMemo(
     () =>
       buildMentionItems(
@@ -97,9 +109,28 @@ export function useSlashMentionInput({
         availableConnectors ?? [],
         mentionAgents,
         availableSubagents,
+        mentionFiles,
+        { filesFirst: isPathLikeMentionQuery(mentionQuery) },
       ),
-    [mentionQuery, availableConnectors, mentionAgents, availableSubagents],
+    [
+      mentionQuery,
+      availableConnectors,
+      mentionAgents,
+      availableSubagents,
+      mentionFiles,
+    ],
   );
+
+  useEffect(() => {
+    setMentionMenuIndex((index) => {
+      if (mentionItems.length === 0) return 0;
+      const clamped = Math.min(index, mentionItems.length - 1);
+      if (!isPathLikeMentionQuery(mentionQuery)) return clamped;
+      const firstFile = firstFileMentionIndex(mentionItems);
+      if (firstFile < 0) return clamped;
+      return mentionItems[clamped]?.kind === "file" ? clamped : firstFile;
+    });
+  }, [mentionItems, mentionQuery]);
 
   const reservedSlashNames = useMemo(() => {
     const names = new Set<string>();
@@ -241,6 +272,17 @@ export function useSlashMentionInput({
   const handleMentionSelect = useCallback(
     (pick: MentionPick) => {
       setMentionMenuOpen(false);
+      if (pick.kind === "file") {
+        const next = replaceFileMentionQuery(
+          text,
+          mentionAtIndex,
+          mentionQuery,
+          pick.path,
+        );
+        setText(next.text);
+        focusAt(next.cursor);
+        return;
+      }
       if (pick.kind === "agent" || pick.kind === "subagent") {
         const tokenName = pick.kind === "subagent" ? pick.slug : pick.label;
         const next = replaceMentionQuery(
@@ -299,7 +341,8 @@ export function useSlashMentionInput({
           mention &&
           (availableConnectors ||
             mentionAgents.length > 0 ||
-            availableSubagents.length > 0)
+            availableSubagents.length > 0 ||
+            agentId)
         ) {
           setMentionMenuOpen(true);
           setMentionQuery(mention.query);
@@ -315,6 +358,7 @@ export function useSlashMentionInput({
       availableConnectors,
       mentionAgents.length,
       availableSubagents.length,
+      agentId,
     ],
   );
 
@@ -322,14 +366,16 @@ export function useSlashMentionInput({
     (e: KeyboardEvent) => {
       if (e.nativeEvent.isComposing || e.keyCode === 229) return;
 
-      if (mentionMenuOpen && mentionItems.length > 0) {
+      if (mentionMenuOpen && (mentionItems.length > 0 || filesLoading)) {
         if (e.key === "ArrowDown") {
           e.preventDefault();
+          if (mentionItems.length === 0) return;
           setMentionMenuIndex((i) => (i + 1) % mentionItems.length);
           return;
         }
         if (e.key === "ArrowUp") {
           e.preventDefault();
+          if (mentionItems.length === 0) return;
           setMentionMenuIndex(
             (i) => (i - 1 + mentionItems.length) % mentionItems.length,
           );
@@ -386,6 +432,7 @@ export function useSlashMentionInput({
       mentionMenuOpen,
       mentionItems,
       mentionMenuIndex,
+      filesLoading,
       handleMentionSelect,
       slashMenuOpen,
       slashMenuFlat,
@@ -412,6 +459,8 @@ export function useSlashMentionInput({
     slashPickerGroups,
     slashMenuItems,
     mentionItems,
+    filesLoading,
+    filesError,
     runSlashCommand,
     matchSlashCommand,
     handleMentionSelect,

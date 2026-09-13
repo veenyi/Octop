@@ -1,4 +1,4 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { SlashCommandSpec } from "../../../api/modules/slash";
 import type { SkillSpec } from "../../Agent/Skills/useSkills";
@@ -65,5 +65,79 @@ describe("useSlashMentionInput skills", () => {
     );
     expect(skillItem?.spec.usage).toBe("/web-search <task>");
     expect(skillItem?.spec.category).toBe("skills");
+  });
+});
+
+describe("useSlashMentionInput workspace files", () => {
+  it("keeps empty @ as a hint-only file section and inserts the workspace path", () => {
+    const setText = vi.fn();
+    const { result } = renderHook(() =>
+      useSlashMentionInput({
+        text: "@",
+        setText,
+        textareaRef: { current: null },
+        slashCommands: [stopCommand],
+        labelFor: (spec) => spec.label_en,
+        locale: "en",
+        availableExperts: [],
+        selectedConnectors: [],
+        agentId: "A1",
+        onSend: vi.fn(),
+        onNewChat: vi.fn(),
+        onCancel: vi.fn(),
+        isStreaming: false,
+        onSubmitRef: { current: vi.fn() },
+      }),
+    );
+
+    expect(result.current.mentionItems).toEqual([]);
+
+    act(() => {
+      result.current.handleTextChange("@");
+    });
+    act(() => {
+      result.current.handleMentionSelect({
+        kind: "file",
+        path: "docs/api.md",
+        label: "api.md",
+      });
+    });
+
+    expect(setText).toHaveBeenCalledWith("@docs/api.md ");
+  });
+
+  it("keeps spaces in the workspace path and does not toggle an existing cite", () => {
+    const setText = vi.fn();
+    const { result } = renderHook(() =>
+      useSlashMentionInput({
+        text: "@docs/api.md @note",
+        setText,
+        textareaRef: { current: null },
+        slashCommands: [stopCommand],
+        labelFor: (spec) => spec.label_en,
+        locale: "en",
+        availableExperts: [],
+        selectedConnectors: [],
+        agentId: "A1",
+        onSend: vi.fn(),
+        onNewChat: vi.fn(),
+        onCancel: vi.fn(),
+        isStreaming: false,
+        onSubmitRef: { current: vi.fn() },
+      }),
+    );
+
+    act(() => {
+      result.current.handleTextChange("@docs/api.md @note");
+    });
+    act(() => {
+      result.current.handleMentionSelect({
+        kind: "file",
+        path: "notes/my file.md",
+        label: "my file.md",
+      });
+    });
+
+    expect(setText).toHaveBeenCalledWith("@docs/api.md @notes/my file.md ");
   });
 });

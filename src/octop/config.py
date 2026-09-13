@@ -392,6 +392,23 @@ def _apply_database_env(merged_db: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def env_bind_overrides() -> tuple[str | None, int | None]:
+    """``OCTOP_BIND_HOST`` / ``OCTOP_PORT`` overrides shared by config and CLI.
+
+    An invalid ``OCTOP_PORT`` logs a warning and yields no override, so the
+    file/default value wins — same fallback semantics as ``load_config``.
+    """
+    host = os.environ.get("OCTOP_BIND_HOST") or None
+    port: int | None = None
+    if v := os.environ.get("OCTOP_PORT"):
+        try:
+            port = int(v)
+        except ValueError:
+            # Do not log the raw env value.
+            logger.warning("env %s is not int; ignoring override", "OCTOP_PORT")
+    return host, port
+
+
 def load_config(path: Path) -> OctopConfig:
     """Load ``config.json``; write defaults if absent. Apply env overrides."""
     file_defaults = _defaults_for_file()
@@ -416,10 +433,11 @@ def load_config(path: Path) -> OctopConfig:
     }
     merged_db = _apply_database_env(merged_db)
 
-    if v := os.environ.get("OCTOP_BIND_HOST"):
-        merged["bind_host"] = v
-    if v := os.environ.get("OCTOP_PORT"):
-        merged["port"] = _coerce_int("OCTOP_PORT", v, merged["port"])
+    env_host, env_port = env_bind_overrides()
+    if env_host is not None:
+        merged["bind_host"] = env_host
+    if env_port is not None:
+        merged["port"] = env_port
     if v := os.environ.get("OCTOP_LOG_LEVEL"):
         merged["log_level"] = v
     if v := os.environ.get("OCTOP_ACCESS_TOKEN_TTL"):
