@@ -62,7 +62,9 @@ async def test_configuration_probe_uses_unsaved_values(
     captured_row: VoiceProviderRow | None = None
     captured_kind = ""
 
-    async def fake_test_stt(row: VoiceProviderRow | None, kind: str) -> dict[str, object]:
+    async def fake_test_stt(
+        row: VoiceProviderRow | None, kind: str, *, locale: str = "en"
+    ) -> dict[str, object]:
         nonlocal captured_row, captured_kind
         captured_row = row
         captured_kind = kind

@@ -8,15 +8,24 @@ import math
 import struct
 import uuid
 from collections.abc import AsyncIterator
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
+from octop.i18n.domains.voice import (
+    format_voice_probe_error,
+    tencent_api_language,
+    voice_credentials_error,
+    voice_not_configured,
+)
 from octop.infra.db.repos.voice_providers import VoiceProviderRow
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.utils.ssrf_guard import validate_https_url_resolved
 from octop.infra.voice.tencent_sign import tc3_headers
+
+_ui_locale: ContextVar[str | None] = ContextVar("voice_ui_locale", default=None)
 
 
 @dataclass(frozen=True)
@@ -175,6 +184,7 @@ async def transcribe_tencent(
         version="2019-06-14",
         payload=payload,
         region=str(extra.get("region") or "ap-guangzhou"),
+        language=tencent_api_language(_ui_locale.get()),
     )
     async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.post(
@@ -219,6 +229,7 @@ async def synthesize_tencent(
         version="2019-08-23",
         payload=payload,
         region=str(extra.get("region") or "ap-guangzhou"),
+        language=tencent_api_language(_ui_locale.get()),
     )
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(
@@ -462,43 +473,39 @@ def _probe_tone_wav() -> bytes:
     return _wav_header(len(pcm), _PROBE_TONE_RATE) + pcm
 
 
-def _missing_credentials(row: VoiceProviderRow, kind: str) -> str | None:
+def _missing_credentials(row: VoiceProviderRow, kind: str, *, locale: str = "en") -> str | None:
     """Probe-time credential check; returns an error message when incomplete."""
     if kind == "tencent":
         try:
             _parse_tencent_credentials(row)
-        except ValueError as exc:
-            return str(exc)
+        except ValueError:
+            return voice_credentials_error(kind, locale)
         return None
     if kind in {"openai", "mimo"} and not row.api_key:
-        return "API credentials missing"
+        return voice_credentials_error(kind, locale)
     return None
 
 
-def _probe_failure(exc: Exception) -> dict[str, Any]:
+def _probe_failure(exc: Exception, *, locale: str = "en") -> dict[str, Any]:
     """Turn a probe-time exception into an ``ok: false`` payload instead of a 500."""
-    if isinstance(exc, httpx.HTTPStatusError):
-        detail = f"provider returned HTTP {exc.response.status_code}"
-    elif isinstance(exc, httpx.HTTPError):
-        detail = f"network error: {type(exc).__name__}"
-    else:
-        detail = str(exc).strip() or type(exc).__name__
-    return {"ok": False, "error": detail}
+    return {"ok": False, "error": format_voice_probe_error(exc, locale)}
 
 
 async def _drain(stream: AsyncIterator[bytes]) -> list[bytes]:
     return [part async for part in stream]
 
 
-async def test_stt(row: VoiceProviderRow | None, kind: str) -> dict[str, Any]:
+async def test_stt(
+    row: VoiceProviderRow | None, kind: str, *, locale: str = "en"
+) -> dict[str, Any]:
     if kind == "browser":
         return {"ok": True, "mode": "browser"}
     if row is None:
-        return {"ok": False, "error": "provider not configured"}
+        return {"ok": False, "error": voice_not_configured(locale)}
     if kind not in {"openai", "tencent", "mimo"}:
         # edge is TTS-only and unknown kinds have no adapter: keep offline pass.
         return {"ok": True, "mode": kind}
-    missing = _missing_credentials(row, kind)
+    missing = _missing_credentials(row, kind, locale=locale)
     if missing:
         return {"ok": False, "error": missing}
     transcribe = (
@@ -508,14 +515,19 @@ async def test_stt(row: VoiceProviderRow | None, kind: str) -> dict[str, Any]:
         if kind == "openai"
         else transcribe_tencent
     )
+    token = _ui_locale.set(locale)
     try:
         await transcribe(row, _probe_tone_wav(), mime="audio/wav", language="zh-CN")
     except Exception as exc:  # probe reports failures, never 500s
-        return _probe_failure(exc)
+        return _probe_failure(exc, locale=locale)
+    finally:
+        _ui_locale.reset(token)
     return {"ok": True, "mode": kind}
 
 
-async def test_tts(row: VoiceProviderRow | None, kind: str) -> dict[str, Any]:
+async def test_tts(
+    row: VoiceProviderRow | None, kind: str, *, locale: str = "en"
+) -> dict[str, Any]:
     if kind == "browser":
         return {"ok": True, "mode": "browser"}
     if kind == "edge":
@@ -535,11 +547,11 @@ async def test_tts(row: VoiceProviderRow | None, kind: str) -> dict[str, Any]:
         try:
             chunks = await _drain(synthesize_edge(edge_row, "ping", voice_id=None, speed=1.0))
         except Exception as exc:  # probe reports failures, never 500s
-            return _probe_failure(exc)
+            return _probe_failure(exc, locale=locale)
         return {"ok": bool(chunks), "bytes": sum(len(c) for c in chunks)}
     if row is None:
-        return {"ok": False, "error": "provider not configured"}
-    missing = _missing_credentials(row, kind)
+        return {"ok": False, "error": voice_not_configured(locale)}
+    missing = _missing_credentials(row, kind, locale=locale)
     if missing:
         return {"ok": False, "error": missing}
     synth = (
@@ -549,8 +561,11 @@ async def test_tts(row: VoiceProviderRow | None, kind: str) -> dict[str, Any]:
         if kind == "openai"
         else synthesize_tencent
     )
+    token = _ui_locale.set(locale)
     try:
         chunks = await _drain(synth(row, "ping", voice_id=None, speed=1.0))
     except Exception as exc:  # probe reports failures, never 500s
-        return _probe_failure(exc)
+        return _probe_failure(exc, locale=locale)
+    finally:
+        _ui_locale.reset(token)
     return {"ok": bool(chunks), "bytes": sum(len(c) for c in chunks)}

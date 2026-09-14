@@ -115,7 +115,11 @@ async def test_provider_error_is_reported_not_raised(monkeypatch: pytest.MonkeyP
     row = _row(kind="tencent", api_key="sid:sk", extra=TENCENT_EXTRA)
     assert await probe_stt(row, "tencent") == {
         "ok": False,
-        "error": "UnsupportedOperation.ServerNotOpen: ASR service is not open.",
+        "error": "This Tencent Cloud voice service is not enabled for the account.",
+    }
+    assert await probe_stt(row, "tencent", locale="zh") == {
+        "ok": False,
+        "error": "当前腾讯云账号尚未开通该语音服务。",
     }
 
 

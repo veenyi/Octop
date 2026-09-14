@@ -682,5 +682,29 @@
     "row_total": "合计",
     "axis_tokens": "Token 数",
     "filename_prefix": "Token用量"
+  },
+  "voice": {
+    "probe": {
+      "not_configured": "尚未配置语音服务商",
+      "credentials_missing": "缺少 API 密钥",
+      "tencent_credentials": "腾讯云需要填写 secret_id 和 secret_key",
+      "http_status": "服务商返回 HTTP {status}",
+      "network_error": "网络错误：{name}"
+    },
+    "tencent": {
+      "AuthFailure": {
+        "SecretIdNotFound": "SecretId 不存在，请检查密钥是否填写正确。",
+        "SignatureFailure": "签名校验失败，请检查 SecretKey 是否填写正确。",
+        "UnauthorizedOperation": "当前腾讯云账号没有该语音接口的访问权限。"
+      },
+      "UnsupportedOperation": {
+        "ServerNotOpen": "当前腾讯云账号尚未开通该语音服务。"
+      },
+      "FailedOperation": {
+        "ServiceIsolate": "腾讯云账号已欠费停服，请充值后重试。"
+      },
+      "UnauthorizedOperation": "当前腾讯云账号没有该语音接口的访问权限。",
+      "RequestLimitExceeded": "腾讯云请求过于频繁，请稍后再试。"
+    }
   }
 }

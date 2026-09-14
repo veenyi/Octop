@@ -5,12 +5,13 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from octop.api.deps import current_user, get_server, require_permission
 from octop.infra.errors import ErrorCode, OctopError
+from octop.infra.utils.locale import resolve_request_locale
 from octop.infra.voice.manager import VoiceManager
 from octop.infra.voice.presets import load_voice_presets
 
@@ -233,15 +234,19 @@ async def admin_delete_voice_provider(
 async def admin_test_voice_provider(
     provider_id: int,
     body: VoiceTestBody,
+    request: Request,
     _: Any = Depends(require_permission("voice")),
     server: Any = Depends(get_server),
 ) -> dict[str, Any]:
-    return await _voice_manager(server).test_provider(provider_id, mode=body.mode)
+    return await _voice_manager(server).test_provider(
+        provider_id, mode=body.mode, locale=resolve_request_locale(request)
+    )
 
 
 @admin_router.post("/test-configuration")
 async def admin_test_voice_configuration(
     body: VoiceConfigurationTestBody,
+    request: Request,
     _: Any = Depends(require_permission("voice")),
     server: Any = Depends(get_server),
 ) -> dict[str, Any]:
@@ -253,4 +258,5 @@ async def admin_test_voice_configuration(
         api_key=body.api_key,
         extra_json=body.extra_json,
         mode=body.mode,
+        locale=resolve_request_locale(request),
     )

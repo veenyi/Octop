@@ -101,4 +101,22 @@ describe("useUpdateStatus", () => {
   it("listens for the shared change event name", () => {
     expect(UPDATE_STATUS_CHANGED_EVENT).toBe("octop:update-status-changed");
   });
+
+  it("trusts server has_update for chrome reminders", async () => {
+    getUpdateStatus.mockResolvedValue({
+      ...sample,
+      latest_version: "0.9.33",
+      has_update: true,
+      stable_only: true,
+      latest_is_prerelease: false,
+    });
+    const { result } = renderHook(() => useUpdateStatus());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(result.current.hasUpdate).toBe(true);
+    expect(result.current.status?.latest_version).toBe("0.9.33");
+  });
 });

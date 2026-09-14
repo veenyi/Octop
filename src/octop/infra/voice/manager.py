@@ -182,13 +182,15 @@ class VoiceManager:
             return
         raise OctopError(ErrorCode.VOICE_KIND_UNSUPPORTED, f"unsupported TTS kind {kind!r}")
 
-    async def test_provider(self, provider_id: int, *, mode: str) -> dict[str, Any]:
+    async def test_provider(
+        self, provider_id: int, *, mode: str, locale: str = "en"
+    ) -> dict[str, Any]:
         row = self._repo.get(provider_id)
         if row is None:
             raise OctopError(ErrorCode.NOT_FOUND, "voice provider not found")
         if mode == "stt":
-            return await adapters.test_stt(row, row.kind)
-        return await adapters.test_tts(row, row.kind)
+            return await adapters.test_stt(row, row.kind, locale=locale)
+        return await adapters.test_tts(row, row.kind, locale=locale)
 
     async def test_configuration(
         self,
@@ -200,6 +202,7 @@ class VoiceManager:
         api_key: str | None,
         extra_json: str | None,
         mode: str,
+        locale: str = "en",
     ) -> dict[str, Any]:
         row = VoiceProviderRow(
             id=0,
@@ -215,5 +218,5 @@ class VoiceManager:
             updated_at=0,
         )
         if mode == "stt":
-            return await adapters.test_stt(row, kind)
-        return await adapters.test_tts(row, kind)
+            return await adapters.test_stt(row, kind, locale=locale)
+        return await adapters.test_tts(row, kind, locale=locale)

@@ -47,16 +47,18 @@ async def test_update_status_reprobes_after_cache_ttl(
 
     monkeypatch.setattr(update_router, "_build_status", fake_build)
 
-    first = await update_router.update_status(_=None)
-    second = await update_router.update_status(_=None)
-    assert first == second
+    server = _settings_server()
+    first = await update_router.update_status(_=None, server=server)
+    second = await update_router.update_status(_=None, server=server)
+    assert first["latest_version"] == second["latest_version"]
+    assert first["has_update"] == second["has_update"]
     assert builds == 1
 
     update_store.cache_status(
         first,
         cached_at=0.0,  # force expiry on next read
     )
-    third = await update_router.update_status(_=None)
+    third = await update_router.update_status(_=None, server=server)
     assert third["has_update"] is True
     assert builds == 2
 
@@ -157,7 +159,7 @@ async def test_upgrade_worker_records_mirror_errors(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(
         update_router,
         "run_upgrade",
-        lambda verbose=False: UpgradeResult(
+        lambda verbose=False, allow_prerelease=False, version=None: UpgradeResult(
             success=False,
             error="upgrade failed on all mirrors",
             mirror_errors=["mirror-a: timeout", "pypi.org: denied"],
@@ -180,7 +182,7 @@ async def test_upgrade_worker_success_includes_mirror_errors(
     monkeypatch.setattr(
         update_router,
         "run_upgrade",
-        lambda verbose=False: UpgradeResult(
+        lambda verbose=False, allow_prerelease=False, version=None: UpgradeResult(
             success=True,
             installed_version="1.2.3",
             mirror_errors=["mirror-a: skipped"],
@@ -201,8 +203,13 @@ async def test_upgrade_worker_success_includes_mirror_errors(
 async def test_upgrade_worker_records_unexpected_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fail_upgrade(*, verbose: bool = False) -> UpgradeResult:
-        del verbose
+    def fail_upgrade(
+        *,
+        verbose: bool = False,
+        allow_prerelease: bool = False,
+        version: str | None = None,
+    ) -> UpgradeResult:
+        del verbose, allow_prerelease, version
         raise RuntimeError("installer crashed")
 
     monkeypatch.setattr(update_router, "run_upgrade", fail_upgrade)
@@ -242,7 +249,7 @@ async def test_upgrade_worker_advances_percent_while_installing(
     monkeypatch.setattr(
         update_router,
         "run_upgrade",
-        lambda verbose=False: (
+        lambda verbose=False, allow_prerelease=False, version=None: (
             time.sleep(0.05) or UpgradeResult(success=True, installed_version="1.2.3")
         ),
     )
@@ -254,6 +261,21 @@ async def test_upgrade_worker_advances_percent_while_installing(
     assert stored is not None
     assert stored.status == UpgradeTaskStatus.COMPLETE
     assert 25 in percents
+
+
+def _settings_server(stable_only: bool | None = None) -> Any:
+    store: dict[str, str] = {}
+    if stable_only is not None:
+        store["update.stable_only"] = "true" if stable_only else "false"
+
+    class Repo:
+        def get(self, key: str) -> str | None:
+            return store.get(key)
+
+        def set(self, key: str, value: str) -> None:
+            store[key] = value
+
+    return type("Server", (), {"services": type("Svc", (), {"settings_repo": Repo()})()})()
 
 
 def test_build_status_success_reports_source(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -286,7 +308,7 @@ async def test_check_endpoint_reports_error_code_when_pypi_unreachable(
 ) -> None:
     monkeypatch.setattr(update_router, "fetch_pypi_info", lambda: None)
 
-    result = await update_router.check_for_updates(_=None)
+    result = await update_router.check_for_updates(_=None, server=_settings_server())
 
     assert result["latest_version"] is None
     assert result["error"] == "could not reach PyPI"
@@ -300,8 +322,153 @@ async def test_check_endpoint_success_passes_source(
     info = self_update.PyPIInfo(version="1.2.3", source="pypi.org")
     monkeypatch.setattr(update_router, "fetch_pypi_info", lambda: info)
 
-    result = await update_router.check_for_updates(_=None)
+    result = await update_router.check_for_updates(_=None, server=_settings_server())
 
     assert result["latest_version"] == "1.2.3"
     assert result["source"] == "pypi.org"
     assert result["error"] is None
+    assert result["stable_only"] is True
+    assert result["latest_is_prerelease"] is False
+
+
+@pytest.mark.asyncio
+async def test_status_stable_only_ignores_prerelease(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    info = self_update.PyPIInfo(version="0.9.34b1", latest_stable="0.9.33", source="pypi.org")
+    monkeypatch.setattr(update_router, "fetch_pypi_info", lambda: info)
+    monkeypatch.setattr(update_router, "get_local_version", lambda: "0.9.32")
+
+    auto = await update_router.update_status(_=None, server=_settings_server(True))
+    assert auto["latest_version"] == "0.9.33"
+    assert auto["has_update"] is True
+    assert auto["latest_is_prerelease"] is False
+    assert auto["stable_only"] is True
+
+    manual = await update_router.check_for_updates(_=None, server=_settings_server(True))
+    assert manual["latest_version"] == "0.9.34b1"
+    assert manual["has_update"] is True
+    assert manual["latest_is_prerelease"] is True
+
+
+@pytest.mark.asyncio
+async def test_status_includes_prerelease_when_stable_only_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    info = self_update.PyPIInfo(version="0.9.34b1", latest_stable="0.9.33", source="pypi.org")
+    monkeypatch.setattr(update_router, "fetch_pypi_info", lambda: info)
+    monkeypatch.setattr(update_router, "get_local_version", lambda: "0.9.33")
+
+    auto = await update_router.update_status(_=None, server=_settings_server(False))
+    assert auto["latest_version"] == "0.9.34b1"
+    assert auto["has_update"] is True
+    assert auto["latest_is_prerelease"] is True
+
+
+@pytest.mark.asyncio
+async def test_patch_settings_remaps_cached_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    info = self_update.PyPIInfo(version="0.9.34b1", latest_stable="0.9.33", source="pypi.org")
+    monkeypatch.setattr(update_router, "fetch_pypi_info", lambda: info)
+    monkeypatch.setattr(update_router, "get_local_version", lambda: "0.9.33")
+    server = _settings_server(True)
+
+    first = await update_router.update_status(_=None, server=server)
+    assert first["latest_version"] == "0.9.33"
+    assert first["has_update"] is False
+
+    body = update_router.UpdateSettingsBody(stable_only=False)
+    patched = await update_router.update_settings(body, server=server, _=None)
+    assert patched["stable_only"] is False
+    assert patched["latest_version"] == "0.9.34b1"
+    assert patched["has_update"] is True
+    assert server.services.settings_repo.get("update.stable_only") == "false"
+
+
+@pytest.mark.asyncio
+async def test_trigger_upgrade_pins_stable_when_prerelease_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    info = self_update.PyPIInfo(version="0.9.34b1", latest_stable="0.9.33", source="pypi.org")
+    monkeypatch.setattr(update_router, "fetch_pypi_info", lambda: info)
+    monkeypatch.setattr(update_router, "get_editable_path", lambda: None)
+
+    captured: dict[str, object] = {}
+
+    async def fake_worker(
+        task_id: str,
+        *,
+        allow_prerelease: bool = False,
+        version: str | None = None,
+    ) -> None:
+        captured["task_id"] = task_id
+        captured["allow_prerelease"] = allow_prerelease
+        captured["version"] = version
+
+    monkeypatch.setattr(update_router, "_upgrade_worker", fake_worker)
+
+    body = update_router.UpgradeBody(version="0.9.33")
+    result = await update_router.trigger_upgrade(
+        body=body,
+        server=_settings_server(True),
+        _=None,
+    )
+    await asyncio.sleep(0)
+    assert result["status"] == "started"
+    assert captured["version"] == "0.9.33"
+    assert captured["allow_prerelease"] is False
+
+
+@pytest.mark.asyncio
+async def test_trigger_upgrade_defaults_to_channel_latest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    info = self_update.PyPIInfo(version="0.9.34b1", latest_stable="0.9.33", source="pypi.org")
+    monkeypatch.setattr(update_router, "fetch_pypi_info", lambda: info)
+    monkeypatch.setattr(update_router, "get_editable_path", lambda: None)
+
+    captured: dict[str, object] = {}
+
+    async def fake_worker(
+        task_id: str,
+        *,
+        allow_prerelease: bool = False,
+        version: str | None = None,
+    ) -> None:
+        captured["allow_prerelease"] = allow_prerelease
+        captured["version"] = version
+
+    monkeypatch.setattr(update_router, "_upgrade_worker", fake_worker)
+
+    result = await update_router.trigger_upgrade(
+        body=update_router.UpgradeBody(),
+        server=_settings_server(True),
+        _=None,
+    )
+    await asyncio.sleep(0)
+    assert result["status"] == "started"
+    assert captured["version"] == "0.9.33"
+    assert captured["allow_prerelease"] is False
+
+
+@pytest.mark.asyncio
+async def test_upgrade_worker_falls_back_to_pinned_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        update_router,
+        "run_upgrade",
+        lambda verbose=False, allow_prerelease=False, version=None: UpgradeResult(
+            success=True,
+            installed_version=None,
+        ),
+    )
+
+    task = await create_task()
+    await update_router._upgrade_worker(task.task_id, version="0.9.33")
+
+    stored = await get_task(task.task_id)
+    assert stored is not None
+    assert stored.status == UpgradeTaskStatus.COMPLETE
+    assert stored.new_version == "0.9.33"

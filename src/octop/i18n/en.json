@@ -682,5 +682,29 @@
     "row_total": "Total",
     "axis_tokens": "Tokens",
     "filename_prefix": "token-usage"
+  },
+  "voice": {
+    "probe": {
+      "not_configured": "provider not configured",
+      "credentials_missing": "API credentials missing",
+      "tencent_credentials": "Tencent Cloud requires secret_id and secret_key",
+      "http_status": "provider returned HTTP {status}",
+      "network_error": "network error: {name}"
+    },
+    "tencent": {
+      "AuthFailure": {
+        "SecretIdNotFound": "SecretId was not found. Check that the key is correct.",
+        "SignatureFailure": "Signature verification failed. Check that the SecretKey is correct.",
+        "UnauthorizedOperation": "This Tencent Cloud account is not authorized for this voice API."
+      },
+      "UnsupportedOperation": {
+        "ServerNotOpen": "This Tencent Cloud voice service is not enabled for the account."
+      },
+      "FailedOperation": {
+        "ServiceIsolate": "The Tencent Cloud account is in arrears. Top up and retry."
+      },
+      "UnauthorizedOperation": "This Tencent Cloud account is not authorized for this voice API.",
+      "RequestLimitExceeded": "Tencent Cloud rate-limited this request. Retry in a moment."
+    }
   }
 }

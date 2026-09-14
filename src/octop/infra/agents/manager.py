@@ -7,8 +7,10 @@ import json
 import logging
 import re
 import shutil
+import threading
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -723,6 +725,7 @@ class AgentManager:
             raise OctopError(ErrorCode.AGENT_NOT_FOUND, f"agent {agent_id!r} not found")
         workspace_dir = self.resolve_workspace_dir(agent_id, persist_if_missing=False)
         async with self._lock:
+            await asyncio.to_thread(self._quiesce_harness_memory, agent_id)
             await self._harness_manager.aremove_agent(agent_id)  # type: ignore[union-attr]
         self._plugin_tool_labels.pop(agent_id, None)
         try:
@@ -749,8 +752,52 @@ class AgentManager:
             row = self._repos.agent_repo.get(agent_id)
             if row is None:
                 raise OctopError(ErrorCode.AGENT_NOT_FOUND, f"agent {agent_id!r} not found")
+            await asyncio.to_thread(self._quiesce_harness_memory, agent_id)
             await self._harness_manager.aremove_agent(agent_id)  # type: ignore[union-attr]
             self._repos.agent_repo.set_state(agent_id, "stopped", error=None)
+
+    def _quiesce_harness_memory(self, agent_id: str) -> None:
+        """Stop memory GC before the harness closes the SQLite backend.
+
+        ``harness-memory`` runs lifecycle GC on a daemon thread. Closing the
+        store while ``list_candidates`` is in flight segfaults (Linux live CI
+        and Windows unit tests with a real HarnessAgentManager).
+        """
+        hm = self._harness_manager
+        if hm is None:
+            return
+        try:
+            entry = hm.get_agent(agent_id)
+        except KeyError:
+            return
+        agent = getattr(entry, "agent", entry)
+        runtime = getattr(agent, "_memory_runtime", None)
+        mw = getattr(runtime, "_middleware", None) if runtime is not None else None
+        if mw is None:
+            return
+        shutdown = getattr(mw, "shutdown", None)
+        if callable(shutdown):
+            with suppress(Exception):
+                shutdown()
+        self._wait_memory_maintenance_idle(mw)
+
+    @staticmethod
+    def _wait_memory_maintenance_idle(mw: object, *, timeout: float = 5.0) -> None:
+        deadline = time.monotonic() + timeout
+        lock = getattr(mw, "_maintenance_running", None)
+        while time.monotonic() < deadline:
+            named_busy = any(
+                thread.is_alive() and thread.name == "hm-maintenance"
+                for thread in threading.enumerate()
+            )
+            lock_busy = isinstance(lock, type(threading.Lock())) and lock.locked()
+            if not named_busy and not lock_busy:
+                return
+            time.sleep(0.05)
+        if isinstance(lock, type(threading.Lock())):
+            acquired = lock.acquire(timeout=max(0.0, deadline - time.monotonic()))
+            if acquired:
+                lock.release()
 
     # ------------------------------------------------------------------
     # Row & config reads — DB lookups, no harness required
@@ -2418,6 +2465,7 @@ class AgentManager:
         self._bootstrap_graph_refresh_pending.discard(agent_id)
         row = self._repos.agent_repo.get(agent_id)
         if not row or not row.enabled or row.last_state == "stopped":
+            await asyncio.to_thread(self._quiesce_harness_memory, agent_id)
             await self._harness_manager.aremove_agent(agent_id)
             return
         if self._harness_manager.shared_factory is None:

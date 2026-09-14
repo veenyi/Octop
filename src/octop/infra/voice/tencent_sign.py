@@ -19,6 +19,7 @@ def tc3_headers(
     version: str,
     payload: dict[str, Any],
     region: str = "ap-guangzhou",
+    language: str | None = None,
 ) -> tuple[dict[str, str], str]:
     timestamp = int(datetime.now(tz=UTC).timestamp())
     date = datetime.fromtimestamp(timestamp, tz=UTC).strftime("%Y-%m-%d")
@@ -54,4 +55,6 @@ def tc3_headers(
         "X-TC-Version": version,
         "X-TC-Region": region,
     }
+    if language:
+        headers["X-TC-Language"] = language
     return headers, payload_str

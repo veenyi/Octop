@@ -561,6 +561,31 @@ async def test_delete_removes_workspace_directory(manager: AgentManager) -> None
 
 
 @pytest.mark.asyncio
+async def test_delete_stops_memory_maintenance_before_close(manager: AgentManager) -> None:
+    agent_id = "AGT_DELETE_MEM"
+    manager._repos.agent_repo.create(agent_id=agent_id, user_id=None, name="delete-mem")
+
+    mw = MagicMock()
+    mw._maintenance_running = None
+    runtime = MagicMock()
+    runtime._middleware = mw
+    agent = MagicMock()
+    agent._memory_runtime = runtime
+    entry = MagicMock()
+    entry.agent = agent
+
+    harness_manager = MagicMock()
+    harness_manager.get_agent.return_value = entry
+    harness_manager.aremove_agent = AsyncMock()
+    manager._harness_manager = harness_manager
+
+    await manager.delete(agent_id)
+
+    mw.shutdown.assert_called_once()
+    harness_manager.aremove_agent.assert_awaited_once_with(agent_id)
+
+
+@pytest.mark.asyncio
 async def test_delete_removes_persisted_workspace_dir(
     manager: AgentManager, tmp_path: Path
 ) -> None:

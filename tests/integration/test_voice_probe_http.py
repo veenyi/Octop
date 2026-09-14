@@ -32,7 +32,7 @@ async def test_probe_stt_reports_provider_error_over_http(
 
     r = await client.post(
         "/api/admin/voice/providers/test-configuration",
-        headers=auth,
+        headers={**auth, "Accept-Language": "zh"},
         json={
             "name": "tencent-asr",
             "kind": "tencent",
@@ -45,7 +45,7 @@ async def test_probe_stt_reports_provider_error_over_http(
     assert r.status_code == 200
     body = r.json()
     assert body["ok"] is False
-    assert "SecretIdNotFound" in body["error"]
+    assert body["error"] == "SecretId 不存在，请检查密钥是否填写正确。"
 
 
 async def test_probe_stt_success_over_http(

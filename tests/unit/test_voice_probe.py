@@ -136,7 +136,11 @@ async def test_tencent_provider_error_is_reported_not_raised(
     row = _row(kind="tencent", api_key="sid:sk", extra=TENCENT_EXTRA)
     assert await probe_tts(row, "tencent") == {
         "ok": False,
-        "error": "AuthFailure.SecretIdNotFound: The SecretId is not found.",
+        "error": "SecretId was not found. Check that the key is correct.",
+    }
+    assert await probe_tts(row, "tencent", locale="zh") == {
+        "ok": False,
+        "error": "SecretId 不存在，请检查密钥是否填写正确。",
     }
 
 
