@@ -22,6 +22,7 @@ import dingtalkIcon from "../../assets/channels/dingtalk.svg";
 import wecomIcon from "../../assets/channels/wecom.svg";
 import googleIcon from "../../assets/providers/google.svg";
 import CaptchaField, { type CaptchaFieldHandle } from "./CaptchaField";
+import ForgotPasswordModal from "./ForgotPasswordModal";
 import { type PublicCaptchaConfig } from "./captchaAdapters";
 
 function providerLabel(
@@ -75,6 +76,7 @@ export default function LoginPage() {
   const [ssoLoadingKind, setSsoLoadingKind] = useState<string | null>(null);
   const [captchaReady, setCaptchaReady] = useState(false);
   const [captchaResetKey, setCaptchaResetKey] = useState(0);
+  const [showForgotHelp, setShowForgotHelp] = useState(false);
   const [captcha, setCaptcha] = useState<PublicCaptchaConfig>({
     provider: "slider",
   });
@@ -221,9 +223,12 @@ export default function LoginPage() {
     <div
       style={{
         minHeight: "100dvh",
+        boxSizing: "border-box",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        padding:
+          "max(24px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(24px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px))",
         background: "var(--fn-bg-layout)",
         transition: "background var(--fn-transition)",
       }}
@@ -245,7 +250,9 @@ export default function LoginPage() {
         }}
       >
         <img
-          src={isDark ? "/logo_name_dark.png" : "/logo_name.png"}
+          src={
+            isDark ? "/logo_horizontal_white.png" : "/logo_horizontal_dark.png"
+          }
           alt="Octop"
           style={{
             height: 48,
@@ -313,6 +320,38 @@ export default function LoginPage() {
         >
           {t("login.submit")}
         </Button>
+
+        <div
+          style={{
+            width: "100%",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <button
+            type="button"
+            data-testid="login-forgot-password-toggle"
+            onClick={() => setShowForgotHelp(true)}
+            style={{
+              margin: 0,
+              padding: 0,
+              border: "none",
+              background: "none",
+              cursor: "pointer",
+              fontSize: 13,
+              lineHeight: 1.5,
+              color: "var(--fn-text-tertiary)",
+            }}
+          >
+            {t("login.forgotPassword", "Forgot password?")}
+          </button>
+          <ForgotPasswordModal
+            open={showForgotHelp}
+            onClose={() => setShowForgotHelp(false)}
+          />
+        </div>
 
         {providers.length > 0 && (
           <>

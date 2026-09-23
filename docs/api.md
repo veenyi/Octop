@@ -126,7 +126,7 @@ does not set these headers itself.
 | `POST`   | `/agents/{id}/stop` | owner | `204` |
 | `POST`   | `/agents/{id}/reload` | owner | `204` (rebuild harness runtime) |
 | `POST`   | `/agents/{id}/read` | owner | `204` (mark unread badge cleared) |
-| `GET`    | `/agents/{id}/status` | owner | `{state, last_error?, ...}` |
+| `GET`    | `/agents/{id}/status` | owner | `{state, last_error?, memory_maintenance?, ...}` |
 | `POST`   | `/agents/from-expert/{expert_id}` | user | body `{name, ...}` → `201` (creates from bundled expert template) |
 | `GET`    | `/agents/{id}/tool-settings` | owner | built-in + installed plugin tools with enable / disableable / available flags |
 | `PUT`    | `/agents/{id}/tool-settings` | owner | body `{disabled_builtin: string[], plugins?}` — persists denylist + plugin flags (hot-sync, no reload) |
@@ -147,10 +147,10 @@ destination synchronized after the request completes.
 
 | Path | Auth | Notes |
 |------|------|-------|
-| `WS /agents/{id}/chat/ws?token=<jwt>` | owner | Primary dashboard turn endpoint. Send `{"type":"user_turn", ...}` frames; server replies with harness stream chunks ending in `{"type":"done"}` or `{"type":"error","message":"..."}`. `{"type":"ping"}` → `{"type":"pong"}`. `{"type":"subscribe","thread_id"}` → `{"type":"turn_status","thread_id","active"}` (attach to an in-flight turn without cancelling on disconnect). `{"type":"cancel","thread_id"}` stops the active turn (explicit stop; disconnect alone does **not** cancel). |
+| `WS /agents/{id}/chat/ws?token=<jwt>` | owner | Primary dashboard turn endpoint. Send `{"type":"user_turn", ...}` frames (optional `hitl_policy` is a thread-scoped tool-approval bypass); server replies with harness stream chunks ending in `{"type":"done"}` or `{"type":"error","message":"..."}`. `{"type":"ping"}` → `{"type":"pong"}`. `{"type":"subscribe","thread_id"}` → `{"type":"turn_status","thread_id","active"}` (attach to an in-flight turn without cancelling on disconnect). `{"type":"cancel","thread_id"}` stops the active turn (explicit stop; disconnect alone does **not** cancel). |
 | `GET /agents/{id}/chat/welcome` | agent access | `{welcome_message, quick_prompts, task_examples}`; `task_examples` is `null` when the workspace field is absent |
 | `POST /agents/{id}/chat/polish` | owner | body `{text, default_model?}` → `{text}` (one-shot prompt refinement) |
-| `POST /agents/{id}/chat/hitl/resume` | owner | body `{thread_id, decisions: [...]}` → SSE chunk stream; finishes with `{"type":"done"}` |
+| `POST /agents/{id}/chat/hitl/resume` | owner | body `{thread_id, decisions: [...], hitl_policy?}` → SSE chunk stream; finishes with `{"type":"done"}`. Optional `hitl_policy` (`ask` / `allow_all` / `allow_tools`) is a thread-scoped bypass and does not change global tool-approval settings. |
 
 ### Legacy SSE
 
@@ -286,7 +286,7 @@ see [Personas](./personas.md).
 |--------|------|------|-------|
 | `GET`    | `/experts` | user | bundled expert catalog (includes `task_examples` `{zh,en}` when present) |
 | `GET`    | `/experts/{expert_id}` | user | full expert template (SOUL.md, skills, files, `task_examples`) |
-| `POST`   | `/agents/from-expert/{expert_id}` | user | body `{name, locale?, ...}` → `201` |
+| `POST`   | `/agents/from-expert/{expert_id}` | user | body `{name, locale?, quick_prompts?, ...}` → `201`; optional `quick_prompts` overwrites workspace cards after seed |
 
 Bundled experts live in `src/octop/infra/agents/experts/library/`
 (en/zh divisions); the catalog is locale-aware via
@@ -388,7 +388,8 @@ for non-`/` paths.
 Custom MCP OAuth (streamable HTTP, public HTTPS URL only): Octop discovers the authorization
 server from the MCP URL (401 / RFC 9728 protected-resource metadata), requires dynamic client
 registration (DCR), stores encrypted tokens in the custom MCP spec, and injects `Authorization:
-Bearer` when loading tools. Loopback MCP URLs do not use remote OAuth discovery.
+Bearer` when loading tools. Loopback and LAN MCP URLs may use HTTP and do not use remote OAuth
+discovery.
 
 ## Internal MCP (harness agents)
 

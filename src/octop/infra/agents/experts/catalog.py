@@ -22,6 +22,7 @@ from harness_agent.backends.workspace import BackendWorkspace
 
 from octop.infra.agents.manager import AgentCreateSpec
 from octop.infra.agents.workspace_dir import DEFAULT_SYSTEM_FILES_PATH
+from octop.infra.errors import ErrorCode, OctopError
 
 logger = logging.getLogger(__name__)
 
@@ -379,6 +380,45 @@ async def read_workspace_manifest_task_examples(
     return parse_task_examples(data)
 
 
+def _quick_prompts_have_content(prompt: ExpertQuickPrompt) -> bool:
+    return bool(prompt.title_zh or prompt.title_en or prompt.prompt_zh or prompt.prompt_en)
+
+
+async def apply_workspace_quick_prompts(
+    workspace: BackendWorkspace,
+    quick_prompts: list[dict[str, Any]],
+) -> None:
+    """Merge installer-owned quick-start cards into workspace ``.octop/manifest.json``.
+
+    Missing file starts from ``{}``. Invalid JSON is refused so a hand-edited
+    manifest is not clobbered during create.
+    """
+    text = await read_workspace_manifest_text(workspace)
+    existing: dict[str, Any] = {}
+    if text is not None and str(text).strip():
+        try:
+            parsed: object = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise OctopError(
+                ErrorCode.SLASH_BAD_ARGS,
+                "workspace manifest.json is not valid JSON",
+            ) from exc
+        if not isinstance(parsed, dict):
+            raise OctopError(
+                ErrorCode.SLASH_BAD_ARGS,
+                "workspace manifest.json is not a JSON object",
+            )
+        existing = parsed
+    parsed_prompts = _parse_quick_prompts({"quick_prompts": list(quick_prompts)})
+    existing["quick_prompts"] = [
+        _quick_prompt_api_dict(prompt)
+        for prompt in parsed_prompts
+        if _quick_prompts_have_content(prompt)
+    ]
+    payload = json.dumps(existing, ensure_ascii=False, indent=2).encode("utf-8")
+    await workspace.aupload_many([(WORKSPACE_MANIFEST_PATH, payload)])
+
+
 def read_text_file_contents(expert_dir: Path, paths: list[str]) -> list[dict[str, str]]:
     """Read UTF-8 text files for API preview; skip unreadable/binary paths."""
     out: list[dict[str, str]] = []
@@ -568,6 +608,72 @@ def default_task_examples(label_zh: str, label_en: str) -> dict[str, list[str]]:
             ),
         ],
     }
+
+
+def resolve_display_task_examples(
+    *,
+    parsed: dict[str, list[str]] | None,
+    catalog: ExpertCatalog | None = None,
+    template_name: str | None = None,
+    label_zh: str = "",
+    label_en: str = "",
+) -> dict[str, list[str]]:
+    """Workspace field, then catalog template, then name-based defaults (never null).
+
+    Explicit empty lists in the workspace stay empty (hide suggestion cards).
+    Missing field falls through so different experts no longer share one i18n set.
+    """
+    if parsed is not None:
+        normalized = normalize_task_examples_for_display(parsed)
+        return normalized if normalized is not None else {"zh": [], "en": []}
+    if catalog is not None and template_name:
+        expert = catalog.get(template_name)
+        summary_examples = (
+            getattr(expert.summary, "task_examples", None) if expert is not None else None
+        )
+        if summary_examples is not None:
+            normalized = normalize_task_examples_for_display(summary_examples)
+            if normalized is not None:
+                return normalized
+    zh = (label_zh or label_en or "助手").strip() or "助手"
+    en = (label_en or label_zh or "Assistant").strip() or "Assistant"
+    return normalize_task_examples_for_display(default_task_examples(zh, en)) or {
+        "zh": [],
+        "en": [],
+    }
+
+
+def display_task_examples_for_agent(
+    *,
+    parsed: dict[str, list[str]] | None,
+    catalog: ExpertCatalog | None = None,
+    row: Any | None = None,
+) -> dict[str, list[str]]:
+    """Apply :func:`resolve_display_task_examples` using labels from an agent row."""
+    name = str(getattr(row, "name", "") or "").strip() if row is not None else ""
+    template = (
+        str(getattr(row, "template_name", None) or "").strip() or None if row is not None else None
+    )
+    return resolve_display_task_examples(
+        parsed=parsed,
+        catalog=catalog,
+        template_name=template,
+        label_zh=name,
+        label_en=name,
+    )
+
+
+async def resolve_agent_display_task_examples(
+    *,
+    workspace: BackendWorkspace | None,
+    row: Any | None,
+    catalog: ExpertCatalog | None = None,
+) -> dict[str, list[str]]:
+    """Load workspace ``task_examples``, then catalog / name fallbacks."""
+    parsed = (
+        await read_workspace_manifest_task_examples(workspace) if workspace is not None else None
+    )
+    return display_task_examples_for_agent(parsed=parsed, catalog=catalog, row=row)
 
 
 def normalize_task_examples_for_display(

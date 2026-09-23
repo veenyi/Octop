@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 
 def _write_manifest(expert_dir: Path, *, extra: dict | None = None) -> None:
     payload: dict = {
@@ -232,6 +234,19 @@ def test_expert_prompt_files_metadata_only(tmp_path: Path) -> None:
     assert skill_body.startswith("# Skill")
 
 
+def test_bundled_default_expert_only_has_agents_md() -> None:
+    from octop.infra.agents.experts.catalog import ExpertCatalog, default_library_root
+
+    catalog = ExpertCatalog(default_library_root())
+    catalog.refresh()
+    expert = catalog.get("default")
+    assert expert is not None
+    assert expert.prompt_files == ["AGENTS.md"]
+    assert expert.files == ["AGENTS.md"]
+    names = {item["name"] for item in catalog.read_file_contents("default")}
+    assert names == {"AGENTS.md"}
+
+
 def test_bundled_office_automation_discovers_skills() -> None:
     from octop.infra.agents.experts.catalog import ExpertCatalog, default_library_root
 
@@ -306,3 +321,58 @@ def test_expert_task_examples_from_manifest(tmp_path: Path) -> None:
         "zh": ["一", "二", "三"],
         "en": ["a", "b", "c"],
     }
+
+
+class _MemWorkspace:
+    def __init__(self, files: dict[str, str] | None = None) -> None:
+        self.files = dict(files or {})
+
+    async def aread_text(self, rel: str) -> str | None:
+        return self.files.get(rel)
+
+    async def aupload_many(self, pairs: list[tuple[str, bytes]]) -> None:
+        for rel, data in pairs:
+            self.files[rel] = data.decode("utf-8")
+
+
+@pytest.mark.asyncio
+async def test_apply_workspace_quick_prompts_merges_and_filters() -> None:
+    from octop.infra.agents.experts.catalog import (
+        WORKSPACE_MANIFEST_PATH,
+        apply_workspace_quick_prompts,
+    )
+
+    workspace = _MemWorkspace(
+        {WORKSPACE_MANIFEST_PATH: json.dumps({"id": "demo", "quick_prompts": []})}
+    )
+    await apply_workspace_quick_prompts(
+        workspace,
+        [
+            {
+                "title": {"zh": "卡", "en": ""},
+                "description": {"zh": "", "en": ""},
+                "prompt": {"zh": "做这件事", "en": ""},
+                "color": "#fff7ed",
+                "icon_name": "zap",
+            },
+            {"title": {"zh": "", "en": ""}, "prompt": {"zh": "", "en": ""}},
+        ],
+    )
+    data = json.loads(workspace.files[WORKSPACE_MANIFEST_PATH])
+    assert data["id"] == "demo"
+    assert len(data["quick_prompts"]) == 1
+    assert data["quick_prompts"][0]["title"]["zh"] == "卡"
+
+
+@pytest.mark.asyncio
+async def test_apply_workspace_quick_prompts_refuses_invalid_json() -> None:
+    from octop.infra.agents.experts.catalog import (
+        WORKSPACE_MANIFEST_PATH,
+        apply_workspace_quick_prompts,
+    )
+    from octop.infra.errors import ErrorCode, OctopError
+
+    workspace = _MemWorkspace({WORKSPACE_MANIFEST_PATH: "{not-json"})
+    with pytest.raises(OctopError) as exc:
+        await apply_workspace_quick_prompts(workspace, [])
+    assert exc.value.code is ErrorCode.SLASH_BAD_ARGS

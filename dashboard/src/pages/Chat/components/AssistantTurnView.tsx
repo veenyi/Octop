@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { ChevronRight, FilePen, Globe } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import type { HitlDecisionHandler } from "../../../api/types/hitl";
 import type { ChatMessage } from "../hooks/useChat";
 import {
   splitAssistantTurn,
@@ -27,6 +28,7 @@ import {
 import { collectTurnToolMedia } from "../../../utils/collectTurnToolMedia";
 import { collectTurnKnowledgeCitations } from "../../../utils/collectTurnKnowledgeCitations";
 import { KnowledgeCitationsStrip } from "./KnowledgeCitationsStrip";
+import { messageSpeakerId } from "../utils/messageGrouping";
 import styles from "../index.module.less";
 
 interface AssistantTurnViewProps {
@@ -41,9 +43,7 @@ interface AssistantTurnViewProps {
   forkDisabled?: boolean;
   forkDisabledHint?: string;
   onAcpPermissionSelect?: (message: string) => void;
-  onHitlDecision?: (
-    decisions: Array<{ type: string; message?: string }>,
-  ) => void;
+  onHitlDecision?: HitlDecisionHandler;
   onOpenBrowser?: () => void;
   onEditFile?: () => void;
   onRunShellCommand?: (code: string) => void;
@@ -61,7 +61,6 @@ function hasProcessContent(
 export default function AssistantTurnView({
   messages,
   agentId: agentIdProp,
-  isStreaming = false,
   isTurnInProgress = false,
   onRegenerate,
   onEditUserMessage,
@@ -80,6 +79,8 @@ export default function AssistantTurnView({
   const { t } = useTranslation();
   const { activeAgentId } = useAgent();
   const agentId = agentIdProp ?? activeAgentId;
+  const speakerAgentId =
+    messages.map((item) => messageSpeakerId(item)).find(Boolean) || agentId;
 
   const hitlLayout = useMemo(
     () => layoutAssistantTurnHitl(messages),
@@ -112,8 +113,7 @@ export default function AssistantTurnView({
   );
 
   const turnStreaming =
-    isTurnInProgress ||
-    (isStreaming && messages.some((m) => m.status === "streaming"));
+    isTurnInProgress || messages.some((m) => m.status === "streaming");
   const usedBrowser = turnUsedBrowserTool(fullSplit);
   const showOpenBrowser = usedBrowser && !!onOpenBrowser;
   const usedFileTool = turnUsedFileTool(fullSplit);
@@ -182,7 +182,7 @@ export default function AssistantTurnView({
                   isStreaming={processStreaming}
                   onAcpPermissionSelect={onAcpPermissionSelect}
                   hideToolMedia={hasToolMedia}
-                  agentId={agentId}
+                  agentId={speakerAgentId}
                   showAvatar={idx === firstSummaryIdx}
                 />
                 {todoPanel && idx === firstProcessSegmentIdx ? (
@@ -206,7 +206,7 @@ export default function AssistantTurnView({
             isStreaming={turnStreaming && !hasPendingHitl}
             onAcpPermissionSelect={onAcpPermissionSelect}
             hideToolMedia={hasToolMedia}
-            agentId={agentId}
+            agentId={speakerAgentId}
             showAvatar={firstSummaryIdx < 0 && trailingHasSummary}
           />
           {todoPanel && firstProcessSegmentIdx < 0 ? (

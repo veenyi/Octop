@@ -30,10 +30,14 @@ export interface HitlActionRequest {
   description?: string;
 }
 
+export type HitlRequestResolution = "approve" | "allow_tool" | "allow_all";
+
 export interface HitlRequestData {
   action_requests: HitlActionRequest[];
   review_configs?: Array<{ action_name: string; allowed_decisions: string[] }>;
   status?: "pending" | "approved" | "rejected";
+  resolution?: HitlRequestResolution;
+  pending_id?: string;
 }
 
 export interface ChatAttachment {
@@ -71,6 +75,13 @@ export interface ChatMessage {
   errorInfo?: ProcessErrorInfo;
   status?: "streaming" | "done" | "error";
   timestamp: number;
+  /**
+   * Team room speaker. When a member is fanned into the host thread, this is
+   * that member's agent id so the bubble can render as a separate person.
+   */
+  speakerAgentId?: string;
+  /** Host wrap-up after members — never continue the dispatch bubble. */
+  teamWrapup?: boolean;
 }
 
 /** Per-session state held in the chat store's module-scoped Map. */
@@ -105,6 +116,11 @@ export interface SessionStreamState {
   listeners: Set<() => void>;
   /** Cached snapshot reference (updated on every notify). */
   _snapshot: SessionSnapshot;
+  /** Room / chat agent id — team host tokens are stamped with this. */
+  roomAgentId?: string;
+  /** Team host room — listen-only sockets and ask_agent continue stay on. */
+  isTeamRoom?: boolean;
+  pendingPlanPath?: string | null;
 }
 
 /** Read-only snapshot shape exposed via ``chatStore.getSnapshot``. */
@@ -119,4 +135,5 @@ export interface SessionSnapshot {
   historyNextOffset: number;
   historyNextCursor?: string | null;
   historyHydrated: boolean;
+  pendingPlanPath?: string | null;
 }
