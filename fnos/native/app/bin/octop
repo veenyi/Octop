@@ -51,14 +51,23 @@ PY="$(find_python312)" || {
 SITE_PACKAGES="$APPDEST/site-packages"
 export PYTHONPATH="${SITE_PACKAGES}${PYTHONPATH:+:${PYTHONPATH}}"
 
-# 内置在线升级优先使用 uv（pip 对 octop-harness[all] 依赖树解析会卡死）。
-# 系统无 uv 且当前为 root 时自动安装一次（装到系统 Python bin，软链到 /usr/local/bin）。
-if [ "$(id -u)" = "0" ] && ! command -v uv >/dev/null 2>&1; then
-    "$PY" -m pip install -q --disable-pip-version-check uv 2>/dev/null || true
-    if [ -x "$(dirname "$PY")/uv" ]; then
-        ln -sf "$(dirname "$PY")/uv" /usr/local/bin/uv 2>/dev/null || true
-    fi
+# 内置在线升级优先使用 uv（pip 对 orcakit-harness-agent[all] 依赖树解析会卡死）。
+# 服务以非 root 用户运行，旧的 root-only 引导永远不会触发；改为以当前用户
+# 安装（--user，落到 ~/.local/bin，detect_installer() 会在该路径找到 uv）。
+# 优先走国内镜像、pypi.org 兜底；已安装则跳过，幂等。
+if ! command -v uv >/dev/null 2>&1 && [ ! -x "${HOME:-}/.local/bin/uv" ]; then
+    for _octop_uv_index in \
+        https://mirrors.cloud.tencent.com/pypi/simple \
+        https://mirrors.aliyun.com/pypi/simple \
+        https://pypi.tuna.tsinghua.edu.cn/simple \
+        https://mirrors.ustc.edu.cn/pypi/simple \
+        https://pypi.org/simple; do
+        "$PY" -m pip install -q --disable-pip-version-check --user --break-system-packages uv -i "$_octop_uv_index" 2>/dev/null && break
+        "$PY" -m pip install -q --disable-pip-version-check --user uv -i "$_octop_uv_index" 2>/dev/null && break
+    done
+    unset _octop_uv_index || true
 fi
+export PATH="${HOME:-}/.local/bin:${PATH}"
 
 # 飞牛 FPK 部署标识 + 打包 site-packages 路径：内置在线升级安装到此目录
 # （launcher 实际加载的位置），重启服务后即加载新版，升级真正生效

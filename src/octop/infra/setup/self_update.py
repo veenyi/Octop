@@ -11,12 +11,9 @@ import subprocess
 import sys
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 from octop.infra.utils.paths import PathLayout
 
@@ -24,12 +21,7 @@ logger = logging.getLogger(__name__)
 
 _PACKAGE_NAME = "octop"
 _PYPI_URL = f"https://pypi.org/pypi/{_PACKAGE_NAME}/json"
-_PYPI_SIMPLE = "https://pypi.org/simple"
 _GREEN_PACKAGES_ENV = "OCTOP_GREEN_PACKAGES"
-_STASH_SUFFIX = ".octop-old"
-_PROBE_TIMEOUT_S = 8
-_INSTALL_TIMEOUT_S = 90
-_FPK_INSTALL_TIMEOUT_S = 900
 
 _MIRRORS = [
     "https://mirrors.cloud.tencent.com/pypi/simple",
@@ -53,17 +45,6 @@ class UpgradeResult:
     error: str | None = None
     installed_version: str | None = None
     mirror_errors: list[str] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class IndexProbe:
-    """Result of probing a PEP 503 simple index for ``octop``."""
-
-    index_url: str
-    label: str
-    elapsed: float
-    status: str  # has_version | missing_version | unreachable
-    detail: str = ""
 
 
 def green_packages_dir() -> Path | None:
@@ -117,6 +98,44 @@ def find_uv_executable() -> str:
     return "uv"
 
 
+def bootstrap_uv(python_exe: str | None = None, *, timeout: int = 300) -> str | None:
+    """Best-effort user-level install of uv when it is missing.
+
+    FPK services run as a non-root user, so a root-only launcher bootstrap
+    never fires and upgrades fall back to pip, whose resolver can stall on
+    the full "orcakit-harness-agent[all]" dependency tree. Installs via
+    "pip --user" (binary lands in "~/.local/bin"), trying the mirror list
+    first because direct pypi.org access is unavailable on some networks.
+    Returns the uv executable path, or None when the fallback to pip must
+    be used.
+    """
+    if detect_installer() == "uv":
+        return find_uv_executable()
+    exe = python_exe or sys.executable
+    # Externally-managed environments (Debian/Ubuntu system Python) reject
+    # --user installs unless --break-system-packages is given; older pips do
+    # not know the flag. Try both variants per index.
+    user_variants = [["--user", "--break-system-packages"], ["--user"]]
+    for index in [*_MIRRORS, "https://pypi.org/simple"]:
+        for extra in user_variants:
+            cmd = [exe, "-m", "pip", "install", "-q", "--disable-pip-version-check", *extra, "uv"]
+            if index:
+                cmd.extend(["-i", index])
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                logger.info("uv bootstrap via %s failed: %s", index or "pypi.org", exc)
+                continue
+            if result.returncode != 0:
+                snippet = (result.stderr or result.stdout or "")[:200]
+                logger.info("uv bootstrap via %s failed: %s", index or "pypi.org", snippet)
+                continue
+            if detect_installer() == "uv":
+                return find_uv_executable()
+    logger.warning("uv bootstrap failed on all indexes; falling back to pip")
+    return None
+
+
 def get_local_version() -> str:
     try:
         from importlib.metadata import version
@@ -126,70 +145,20 @@ def get_local_version() -> str:
         return "0.0.0"
 
 
+def fetch_latest_pypi_version(timeout: int = 10) -> str | None:
+    info = fetch_pypi_info(timeout=timeout)
+    return info.version if info else None
+
+
 @dataclass
 class PyPIInfo:
     version: str
-    """Newest version on the index, including pre-releases (``latest_any``)."""
-
     description: str | None = None
-    """Package long description."""
-
-    source: str | None = None
-    """Label of the source that served this payload (e.g. ``pypi.org``)."""
-
-    latest_stable: str | None = None
-    """Newest non-pre-release version, or None if every release is a pre-release."""
-
-
-def fetch_latest_pypi_version(
-    timeout: int = 10,
-    *,
-    include_prerelease: bool = False,
-) -> str | None:
-    info = fetch_pypi_info(timeout=timeout)
-    if info is None:
-        return None
-    if include_prerelease:
-        return info.version
-    return info.latest_stable
-
-
-def _usable_release_versions(data: dict[str, Any]) -> list[str]:
-    """Return PyPI ``releases`` keys that are not fully yanked."""
-    releases = data.get("releases")
-    if not isinstance(releases, dict):
-        return []
-    versions: list[str] = []
-    for raw_ver, files in releases.items():
-        ver = str(raw_ver)
-        if not ver:
-            continue
-        if (
-            isinstance(files, list)
-            and files
-            and all(isinstance(item, dict) and item.get("yanked") for item in files)
-        ):
-            continue
-        versions.append(ver)
-    return versions
-
-
-def pick_latest_versions(versions: list[str]) -> tuple[str | None, str | None]:
-    """Return ``(latest_any, latest_stable)`` using PEP 440 order."""
-    usable = [ver for ver in versions if ver]
-    if not usable:
-        return None, None
-    latest_any = max(usable, key=parse_version)
-    stables = [ver for ver in usable if not is_prerelease(ver)]
-    latest_stable = max(stables, key=parse_version) if stables else None
-    return latest_any, latest_stable
 
 
 def fetch_pypi_info(timeout: int = 10) -> PyPIInfo | None:
     """Fetch version and long description from the PyPI JSON API.
 
-    ``version`` is the newest release including pre-releases. ``latest_stable``
-    is the newest non-pre-release (None when the index only has pre-releases).
     Returns None on any network or parse failure.
     """
     try:
@@ -200,19 +169,9 @@ def fetch_pypi_info(timeout: int = 10) -> PyPIInfo | None:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         info = data["info"]
-        versions = _usable_release_versions(data)
-        info_version = str(info["version"])
-        if info_version and info_version not in versions:
-            versions.append(info_version)
-        latest_any, latest_stable = pick_latest_versions(versions)
-        if latest_any is None:
-            latest_any = info_version
-            latest_stable = info_version if not is_prerelease(info_version) else None
         return PyPIInfo(
-            version=latest_any,
-            latest_stable=latest_stable,
+            version=str(info["version"]),
             description=info.get("description"),
-            source="pypi.org",
         )
     except (urllib.error.URLError, TimeoutError, KeyError, json.JSONDecodeError) as exc:
         logger.warning("failed to fetch PyPI info: %s", exc)
@@ -237,48 +196,7 @@ def parse_changelog_for_version(description: str | None, version: str) -> str | 
     return match.group(1).strip()
 
 
-# PEP 440 letter ranks: a/alpha < b/beta < rc/c/pre/preview. Final has no pre.
-_PRE_RANK = {
-    "a": 0,
-    "alpha": 0,
-    "b": 1,
-    "beta": 1,
-    "c": 2,
-    "rc": 2,
-    "pre": 2,
-    "preview": 2,
-}
-
-_PEP440_RE = re.compile(
-    r"""
-    ^v?
-    (?:(?P<epoch>\d+)!)?
-    (?P<release>\d+(?:\.\d+)*)
-    (?:
-        [-_\.]?
-        (?P<pre_l>alpha|a|beta|b|preview|pre|rc|c)
-        [-_\.]?
-        (?P<pre_n>\d+)?
-    )?
-    (?:
-        (?:[-_\.]?(?P<post_l>post|rev|r)[-_\.]?(?P<post_n>\d+))
-        |
-        (?:-(?P<post_n1>\d+))
-    )?
-    (?:
-        [-_\.]?
-        (?P<dev_l>dev)
-        [-_\.]?
-        (?P<dev_n>\d+)?
-    )?
-    (?:\+(?P<local>[a-z0-9]+(?:[-_\.][a-z0-9]+)*))?
-    $
-    """,
-    re.VERBOSE | re.IGNORECASE,
-)
-
-
-def _numeric_release_key(value: str) -> tuple[int, ...]:
+def parse_version(value: str) -> tuple[int, ...]:
     parts: list[int] = []
     for segment in value.split("."):
         numeric = ""
@@ -288,50 +206,7 @@ def _numeric_release_key(value: str) -> tuple[int, ...]:
             else:
                 break
         parts.append(int(numeric) if numeric else 0)
-    return tuple(parts) or (0,)
-
-
-VersionKey = tuple[int, tuple[int, ...], tuple[int, ...], int, tuple[int, ...]]
-
-
-def parse_version(value: str) -> VersionKey:
-    """Return a comparable PEP 440 sort key for *value*."""
-    match = _PEP440_RE.match(value.strip())
-    if match is None:
-        # Unknown shape: keep previous numeric-only behaviour.
-        numeric = _numeric_release_key(value)
-        return (0, numeric + (0,) * max(0, 8 - len(numeric)), (1,), -1, (1,))
-    epoch = int(match.group("epoch") or 0)
-    release_parts = tuple(int(part) for part in match.group("release").split("."))
-    # Pad so 1.0 and 1.0.0 compare equal under tuple ordering.
-    release = release_parts + (0,) * max(0, 8 - len(release_parts))
-    pre_l = match.group("pre_l")
-    if pre_l:
-        pre_key: tuple[int, ...] = (
-            0,
-            _PRE_RANK[pre_l.lower()],
-            int(match.group("pre_n") or 0),
-        )
-    elif match.group("dev_l"):
-        # Bare .devN sorts before a/b/rc of the same release.
-        pre_key = (-1,)
-    else:
-        pre_key = (1,)
-    post_raw = match.group("post_n") or match.group("post_n1")
-    post_key = int(post_raw) if post_raw is not None else -1
-    if match.group("dev_l"):
-        dev_key: tuple[int, ...] = (0, int(match.group("dev_n") or 0))
-    else:
-        dev_key = (1,)
-    return (epoch, release, pre_key, post_key, dev_key)
-
-
-def is_prerelease(value: str) -> bool:
-    """True when *value* is a PEP 440 pre-release (a/b/rc/dev)."""
-    match = _PEP440_RE.match(value.strip())
-    if match is None:
-        return False
-    return match.group("pre_l") is not None or match.group("dev_l") is not None
+    return tuple(parts)
 
 
 def is_newer(remote: str, local: str) -> bool:
@@ -375,40 +250,16 @@ def find_pip_in_venv(python_exe: str) -> str | None:
     return None
 
 
-def package_requirement(version: str | None = None) -> str:
-    """Return ``octop`` or a pinned ``octop==<version>`` spec."""
-    if version:
-        return f"{_PACKAGE_NAME}=={version}"
-    return _PACKAGE_NAME
-
-
-def append_prerelease_flags(
-    cmd: list[str],
-    installer: str,
-    *,
-    allow_prerelease: bool,
-) -> None:
-    if not allow_prerelease:
-        return
-    if installer == "uv":
-        cmd.extend(["--prerelease", "allow"])
-    else:
-        cmd.append("--pre")
-
-
 def build_upgrade_command(
     installer: str,
     venv_python: str,
     *,
     index_url: str = "",
-    allow_prerelease: bool = False,
-    version: str | None = None,
 ) -> list[str] | None:
     target = green_packages_dir()
     target_args: list[str] = []
     if target is not None:
         target_args = ["--target", str(target)]
-    requirement = package_requirement(version)
 
     if installer == "uv":
         uv_exe = find_uv_executable()
@@ -424,8 +275,7 @@ def build_upgrade_command(
         ]
         if index_url:
             cmd.extend(["--index-url", index_url])
-        append_prerelease_flags(cmd, installer, allow_prerelease=allow_prerelease)
-        cmd.append(requirement)
+        cmd.append(_PACKAGE_NAME)
         return cmd
 
     upgrade_flags = ["--upgrade", "--upgrade-strategy", "only-if-needed"]
@@ -442,70 +292,8 @@ def build_upgrade_command(
             cmd = [standalone, "install", *upgrade_flags, *target_args]
     if index_url:
         cmd.extend(["-i", index_url])
-    append_prerelease_flags(cmd, installer, allow_prerelease=allow_prerelease)
-    cmd.append(requirement)
+    cmd.append(_PACKAGE_NAME)
     return cmd
-
-
-def _is_windows() -> bool:
-    return os.name == "nt"
-
-
-def stash_console_scripts(python_exe: str) -> list[tuple[Path, Path]]:
-    """Rename the ``octop`` launchers next to *python_exe* out of the way.
-
-    Windows refuses to delete or overwrite the executable backing a running
-    process (``os error 32``), which makes pip and uv fail while rewriting
-    ``Scripts/octop.exe`` during ``octop update``. Renaming the file is still
-    permitted, so the installer gets a free path and the running process keeps
-    its handle. Returns the ``(original, stash)`` pairs that were moved.
-    """
-    if not _is_windows():
-        return []
-    script_dir = Path(python_exe).parent
-    _purge_stale_stashes(script_dir)
-    moved: list[tuple[Path, Path]] = []
-    for script in sorted(script_dir.glob(f"{_PACKAGE_NAME}*.exe")):
-        stash = script.with_name(script.name + _STASH_SUFFIX)
-        try:
-            script.replace(stash)
-        except OSError as exc:
-            logger.warning("could not move %s aside: %s", script, exc)
-            continue
-        moved.append((script, stash))
-    return moved
-
-
-def restore_console_scripts(moved: list[tuple[Path, Path]]) -> None:
-    """Put stashed launchers back after a failed upgrade."""
-    for original, stash in moved:
-        if original.exists() or not stash.exists():
-            continue
-        try:
-            stash.replace(original)
-        except OSError as exc:
-            logger.warning("could not restore %s: %s", original, exc)
-
-
-def discard_console_script_stashes(moved: list[tuple[Path, Path]]) -> None:
-    """Drop stashes after a successful upgrade, ignoring still-locked files."""
-    for _original, stash in moved:
-        _unlink_quietly(stash)
-
-
-def _purge_stale_stashes(script_dir: Path) -> None:
-    for stale in script_dir.glob(f"*{_STASH_SUFFIX}"):
-        _unlink_quietly(stale)
-
-
-def _unlink_quietly(path: Path) -> None:
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        pass
-    except OSError as exc:
-        # Still held by the running process — the next upgrade purges it.
-        logger.debug("could not remove %s: %s", path, exc)
 
 
 def get_installed_version(python_exe: str) -> str | None:
@@ -547,146 +335,6 @@ def get_version_in_dir(python_exe: str, target: str) -> str | None:
     return None
 
 
-def index_label(index_url: str) -> str:
-    """Short label for logs / UI (hostname, or ``pypi.org``)."""
-    host = urllib.parse.urlparse(index_url).hostname
-    if host == "pypi.org":
-        return "pypi.org"
-    return host or index_url
-
-
-def _index_package_url(index_url: str) -> str:
-    return f"{index_url.rstrip('/')}/{_PACKAGE_NAME}/"
-
-
-def page_has_package_version(body: str, version: str | None) -> bool:
-    """True when a PEP 503 simple page lists *version* (or any file when unpinned)."""
-    if not version:
-        return bool(body.strip())
-    # Wheel / sdist names: octop-1.0.1-py3-none-any.whl, octop-1.0.1.tar.gz
-    return f"{_PACKAGE_NAME}-{version}-" in body or f"{_PACKAGE_NAME}-{version}." in body
-
-
-def probe_index(
-    index_url: str,
-    *,
-    version: str | None = None,
-    timeout: float = _PROBE_TIMEOUT_S,
-) -> IndexProbe:
-    """GET ``{index}/{package}/`` and classify reachability / version presence."""
-    label = index_label(index_url)
-    url = _index_package_url(index_url)
-    started = time.monotonic()
-    try:
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": f"{_PACKAGE_NAME}-updater/1.0"},
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = resp.read().decode("utf-8", errors="replace")
-        elapsed = time.monotonic() - started
-        if page_has_package_version(body, version):
-            return IndexProbe(index_url, label, elapsed, "has_version")
-        detail = f"missing_version {version}" if version else "missing_version"
-        return IndexProbe(index_url, label, elapsed, "missing_version", detail)
-    except Exception as exc:
-        elapsed = time.monotonic() - started
-        exc_text = str(exc).lower()
-        kind = (
-            "timeout" if isinstance(exc, TimeoutError) or "timed out" in exc_text else "unreachable"
-        )
-        return IndexProbe(index_url, label, elapsed, "unreachable", f"{kind}: {exc}")
-
-
-def rank_install_indexes(
-    version: str | None,
-    *,
-    probe_timeout: float = _PROBE_TIMEOUT_S,
-) -> tuple[list[tuple[str, str]], list[str]]:
-    """Probe mirrors in parallel; return ``([(index_url, label), ...], skip_errors)``.
-
-    Install candidates are indexes that list the target version, ordered by probe
-    latency. ``pypi.org`` is always appended as a final fallback even when its
-    probe fails (HTML parse misses / transient errors).
-    """
-    indexes = [*_MIRRORS, _PYPI_SIMPLE]
-    probes: list[IndexProbe] = []
-    with ThreadPoolExecutor(max_workers=len(indexes)) as pool:
-        futures = [
-            pool.submit(probe_index, url, version=version, timeout=probe_timeout) for url in indexes
-        ]
-        for fut in as_completed(futures):
-            probes.append(fut.result())
-
-    skip_errors: list[str] = []
-    mirror_hits: list[IndexProbe] = []
-    pypi_probe: IndexProbe | None = None
-    for probe in probes:
-        if probe.label == "pypi.org":
-            pypi_probe = probe
-            continue
-        if probe.status == "has_version":
-            mirror_hits.append(probe)
-        else:
-            skip_errors.append(f"{probe.label}: {probe.detail or probe.status}")
-
-    mirror_hits.sort(key=lambda item: item.elapsed)
-    ordered: list[tuple[str, str]] = [(item.index_url, item.label) for item in mirror_hits]
-
-    if pypi_probe is not None and pypi_probe.status != "has_version":
-        skip_errors.append(f"pypi.org: {pypi_probe.detail or pypi_probe.status}")
-    ordered.append((_PYPI_SIMPLE, "pypi.org"))
-    return ordered, skip_errors
-
-
-def _all_mirrors_failed(mirror_errors: list[str]) -> UpgradeResult:
-    hint = ""
-    if mirror_errors:
-        preferred = next(
-            (
-                err
-                for err in mirror_errors
-                if "missing_version" not in err and "unreachable:" not in err
-            ),
-            next(
-                (err for err in mirror_errors if "missing_version" not in err),
-                mirror_errors[0],
-            ),
-        )
-        short = preferred if len(preferred) <= 120 else preferred[:117] + "..."
-        hint = f" ({short})"
-    return UpgradeResult(
-        success=False,
-        error=f"upgrade failed on all mirrors{hint}",
-        mirror_errors=mirror_errors,
-    )
-
-
-def _run_install_cmd(
-    cmd: list[str],
-    label: str,
-    *,
-    verbose: bool,
-    timeout: float,
-) -> tuple[int | None, str]:
-    logger.debug("running %s: %s", label, " ".join(cmd))
-    try:
-        # NOCA:DangerousSubprocessUseAudit(argv list with shell=False; installer paths and mirrors are trusted)
-        result = subprocess.run(
-            cmd,
-            check=False,
-            capture_output=not verbose,
-            text=True,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired:
-        return None, f"timed out after {int(timeout)}s"
-    if result.returncode == 0:
-        return 0, ""
-    snippet = (result.stderr or result.stdout or "")[:300]
-    return result.returncode, snippet
-
-
 def _verify_fpk_upgrade(
     local_ver: str,
     site_packages: str,
@@ -726,13 +374,7 @@ def _verify_fpk_upgrade(
     )
 
 
-def _run_fpk_upgrade(
-    site_packages: str,
-    *,
-    verbose: bool = False,
-    allow_prerelease: bool = False,
-    version: str | None = None,
-) -> UpgradeResult:
+def _run_fpk_upgrade(site_packages: str, *, verbose: bool = False) -> UpgradeResult:
     """FnOS FPK 部署下的在线升级：把新版安装到 launcher 实际加载的打包目录。
 
     launcher 通过 PYTHONPATH 从应用中心托管的打包 site-packages 加载 octop，
@@ -740,8 +382,9 @@ def _run_fpk_upgrade(
     安装到该打包目录本身，重启服务后即加载新版，升级真正生效。
 
     与普通部署不同，FPK 首次在线升级需要从零解析并下载完整依赖树
-    （octop 依赖 octop-harness 等大包），故安装超时显著放宽；先并行探测
-    simple index，缺版本/不可达的镜像直接跳过，最后以 pypi.org 兜底。
+    （octop 依赖 orcakit-harness-agent 等大包），故超时显著放宽；且某镜像
+    可能滞后（装到同版本旧版），此时继续尝试下一个镜像，最后以 pypi.org
+    兜底，避免「镜像有货但版本不新」导致升级假成功。
     """
     if not os.path.isdir(site_packages):
         return UpgradeResult(
@@ -749,12 +392,43 @@ def _run_fpk_upgrade(
             error=f"FPK site-packages 目录不存在：{site_packages}",
         )
     local_ver = get_local_version()
-    ordered, mirror_errors = rank_install_indexes(version)
-    python_exe = sys.executable
-    installer = detect_installer()  # uv 优先：pip 对 octop-harness[all] 依赖树解析会卡死
+    mirror_errors: list[str] = []
+    per_mirror_timeout = 900  # FPK 首次升级需下载完整依赖树，180s 不够
 
-    def _build_cmd(index_url: str) -> list[str]:
-        requirement = package_requirement(version)
+    def _with_manifest_sync(res: UpgradeResult) -> UpgradeResult:
+        """Best-effort app-center manifest version sync after a real upgrade."""
+        if res.success and res.installed_version and refresh_fpk_manifest_version(res.installed_version):
+            if res.message:
+                res.message += "（应用中心版本号已同步）"
+        return res
+
+    def _run_install(cmd: list[str], label: str) -> tuple[int | None, str]:
+        logger.debug("running %s: %s", label, " ".join(cmd))
+        try:
+            # NOCA:DangerousSubprocessUseAudit(argv list with shell=False; installer paths and mirrors are trusted)
+            result = subprocess.run(
+                cmd,
+                check=False,
+                capture_output=not verbose,
+                text=True,
+                timeout=per_mirror_timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return None, f"timed out after {per_mirror_timeout}s"
+        if result.returncode == 0:
+            return 0, ""
+        snippet = (result.stderr or result.stdout or "")[:300]
+        return result.returncode, snippet
+
+    python_exe = sys.executable
+    installer = detect_installer()  # uv 优先：pip 对 orcakit-harness-agent[all] 依赖树解析会卡死
+    if installer != "uv":
+        # 非 root 部署可能没有 uv（launcher 的 root-only 引导永不触发），
+        # 现场以当前用户引导一个（镜像优先）；引导失败才落到 pip。
+        bootstrap_uv(python_exe)
+        installer = detect_installer()
+
+    def _build_cmd(index_url: str = "") -> list[str]:
         if installer == "uv":
             cmd = [
                 find_uv_executable(),
@@ -766,11 +440,10 @@ def _run_fpk_upgrade(
                 site_packages,
                 "--upgrade-package",
                 _PACKAGE_NAME,
-                "--index-url",
-                index_url,
             ]
-            append_prerelease_flags(cmd, installer, allow_prerelease=allow_prerelease)
-            cmd.append(requirement)
+            if index_url:
+                cmd.extend(["--index-url", index_url])
+            cmd.append(_PACKAGE_NAME)
             return cmd
         cmd = [
             python_exe,
@@ -782,107 +455,158 @@ def _run_fpk_upgrade(
             "only-if-needed",
             "--target",
             site_packages,
-            "-i",
-            index_url,
         ]
-        append_prerelease_flags(cmd, installer, allow_prerelease=allow_prerelease)
-        cmd.append(requirement)
+        if index_url:
+            cmd.extend(["-i", index_url])
+        cmd.append(_PACKAGE_NAME)
         return cmd
 
-    for index_url, label in ordered:
-        rc, err_snippet = _run_install_cmd(
-            _build_cmd(index_url),
-            label,
-            verbose=verbose,
-            timeout=_FPK_INSTALL_TIMEOUT_S,
-        )
+    for mirror in _MIRRORS:
+        rc, err_snippet = _run_install(_build_cmd(mirror), mirror)
         if rc != 0:
-            mirror_errors.append(f"{label}: {err_snippet or 'unknown error'}")
+            mirror_errors.append(f"{mirror}: {err_snippet}")
             continue
         res = _verify_fpk_upgrade(local_ver, site_packages, python_exe, mirror_errors)
         if res.success:
-            return res
+            return _with_manifest_sync(res)
         # 镜像装到了同版本/旧版（同步滞后）：继续尝试下一个镜像
-        mirror_errors.append(f"{label}: {res.error or 'version unchanged'}")
+        mirror_errors.append(f"{mirror}: {res.error or 'version unchanged'}")
 
-    return _all_mirrors_failed(mirror_errors)
+    rc, err_snippet = _run_install(_build_cmd(), "pypi.org")
+    if rc != 0:
+        mirror_errors.append(f"pypi.org: {err_snippet or 'unknown error'}")
+        return UpgradeResult(
+            success=False,
+            error="upgrade failed on all mirrors",
+            mirror_errors=mirror_errors,
+        )
+    return _with_manifest_sync(_verify_fpk_upgrade(local_ver, site_packages, python_exe, mirror_errors))
 
 
-def run_upgrade(
-    *,
-    verbose: bool = False,
-    allow_prerelease: bool = False,
-    version: str | None = None,
-) -> UpgradeResult:
+def _fpk_manifest_path() -> Path | None:
+    root = (os.environ.get("TRIM_APPDEST") or "").strip()
+    if not root:
+        return None
+    path = Path(root) / "manifest"
+    return path if path.is_file() else None
+
+
+def refresh_fpk_manifest_version(version: str, *, use_sudo: bool = True) -> bool:
+    """Sync the app-center manifest version after a successful in-app upgrade.
+
+    The app-center UI reads "version" from "$TRIM_APPDEST/manifest"; without
+    this refresh the UI keeps showing the bundled version forever even though
+    the running code was upgraded (the manifest is root-owned, so the service
+    user cannot write it directly). Uses passwordless sudo when available --
+    the FPK installer already grants the app user NOPASSWD for its install
+    callbacks -- and never fails the upgrade itself.
+    """
+    path = _fpk_manifest_path()
+    if path is None or not version:
+        return False
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        logger.info("manifest refresh skipped (unreadable): %s", exc)
+        return False
+    if not re.search(r"(?m)^[ \t]*version[ \t]*=", text):
+        logger.info("manifest refresh skipped: no version line in " + str(path))
+        return False
+    # fnOS manifests pad the key ("version               = 1.0.2b5"); keep the
+    # original key spelling and only replace the value.
+    if re.search(r"(?m)^[ \t]*version[ \t]*=[ \t]*" + re.escape(version) + r"[ \t]*$", text):
+        return True
+    new_text = re.sub(
+        r"(?m)^([ \t]*version[ \t]*=[ \t]*).*$",
+        lambda m: m.group(1) + version,
+        text,
+        count=1,
+    )
+    commands: list[list[str]] = []
+    if use_sudo and shutil.which("sudo"):
+        commands.append(["sudo", "-n", "tee", str(path)])
+    commands.append(["tee", str(path)])
+    for cmd in commands:
+        try:
+            result = subprocess.run(
+                cmd,
+                input=new_text,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logger.info("manifest refresh via %s failed: %s", cmd[0], exc)
+            continue
+        if result.returncode == 0:
+            logger.info("app-center manifest version refreshed to %s", version)
+            return True
+        logger.info("manifest refresh via %s failed: %s", cmd[0], (result.stderr or "")[:200])
+    return False
+
+
+def run_upgrade(*, verbose: bool = False) -> UpgradeResult:
     # [FPK] FnOS FPK 部署：launcher 通过 PYTHONPATH 从应用中心托管的打包
     # site-packages 加载 octop，在线安装到系统 Python 永远不会被加载（重启
     # 无效）。launcher 导出 OCTOP_FPK_SITE_PACKAGES 指向该打包目录，升级即
     # 安装到此目录并提示重启服务生效——升级真正可用，而非禁止升级。
     _fpk_site = os.environ.get("OCTOP_FPK_SITE_PACKAGES", "").strip()
     if _fpk_site:
-        return _run_fpk_upgrade(
-            _fpk_site,
-            verbose=verbose,
-            allow_prerelease=allow_prerelease,
-            version=version,
-        )
-
-    # Windows keeps the running octop.exe locked (os error 32), so pip / uv
-    # cannot rewrite the console script. Renaming it is still allowed, so move
-    # the launchers aside first and restore them if the upgrade fails.
-    stashed = stash_console_scripts(resolve_venv_python())
-    try:
-        result = _run_managed_upgrade(
-            verbose=verbose,
-            allow_prerelease=allow_prerelease,
-            version=version,
-        )
-    except BaseException:
-        restore_console_scripts(stashed)
-        raise
-    if result.success:
-        discard_console_script_stashes(stashed)
-    else:
-        restore_console_scripts(stashed)
-    return result
-
-
-def _run_managed_upgrade(
-    *,
-    verbose: bool = False,
-    allow_prerelease: bool = False,
-    version: str | None = None,
-) -> UpgradeResult:
+        return _run_fpk_upgrade(_fpk_site, verbose=verbose)
     installer = detect_installer()
     venv_python = resolve_venv_python()
     local_ver = get_local_version()
-    ordered, mirror_errors = rank_install_indexes(version)
+    mirror_errors: list[str] = []
+    per_mirror_timeout = 180
 
-    for index_url, label in ordered:
-        cmd = build_upgrade_command(
-            installer,
-            venv_python,
-            index_url=index_url,
-            allow_prerelease=allow_prerelease,
-            version=version,
-        )
+    def _run_install(cmd: list[str], label: str) -> tuple[int | None, str]:
+        logger.debug("running %s: %s", label, " ".join(cmd))
+        try:
+            # NOCA:DangerousSubprocessUseAudit(argv list with shell=False; installer paths and mirrors are trusted)
+            result = subprocess.run(
+                cmd,
+                check=False,
+                capture_output=not verbose,
+                text=True,
+                timeout=per_mirror_timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return None, f"timed out after {per_mirror_timeout}s"
+        if result.returncode == 0:
+            return 0, ""
+        snippet = (result.stderr or result.stdout or "")[:300]
+        return result.returncode, snippet
+
+    for mirror in _MIRRORS:
+        cmd = build_upgrade_command(installer, venv_python, index_url=mirror)
         if cmd is None:
             return UpgradeResult(
                 success=False,
                 error="pip is not available for the Octop virtual environment.",
                 mirror_errors=mirror_errors,
             )
-        rc, err_snippet = _run_install_cmd(
-            cmd,
-            label,
-            verbose=verbose,
-            timeout=_INSTALL_TIMEOUT_S,
-        )
+        rc, err_snippet = _run_install(cmd, mirror)
         if rc == 0:
             return _verify_upgrade(local_ver, venv_python, mirror_errors)
-        mirror_errors.append(f"{label}: {err_snippet or 'unknown error'}")
+        mirror_errors.append(f"{mirror}: {err_snippet}")
 
-    return _all_mirrors_failed(mirror_errors)
+    cmd = build_upgrade_command(installer, venv_python)
+    if cmd is None:
+        return UpgradeResult(
+            success=False,
+            error="pip is not available for the Octop virtual environment.",
+            mirror_errors=mirror_errors,
+        )
+    rc, err_snippet = _run_install(cmd, "pypi.org")
+    if rc != 0:
+        mirror_errors.append(f"pypi.org: {err_snippet or 'unknown error'}")
+        return UpgradeResult(
+            success=False,
+            error="upgrade failed on all mirrors",
+            mirror_errors=mirror_errors,
+        )
+    return _verify_upgrade(local_ver, venv_python, mirror_errors)
 
 
 def _verify_upgrade(
