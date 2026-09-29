@@ -1,6 +1,17 @@
 #!/bin/bash
 set -euo pipefail
 
+# Honor the display/port chosen at install time (persisted in desktop.env)
+# instead of hardcoding :99/5900.
+OCTOP_HOME="${OCTOP_HOME:-/root/.octop}"
+DESKTOP_ENV="${OCTOP_HOME}/desktop/desktop.env"
+if [ -f "$DESKTOP_ENV" ]; then
+  # shellcheck disable=SC1090
+  . "$DESKTOP_ENV"
+fi
+DISPLAY_NUM="${OCTOP_DESKTOP_DISPLAY:-:99}"
+VNC_PORT="${OCTOP_DESKTOP_VNC_PORT:-5900}"
+
 _xvnc_alive() {
   local pattern="$1"
   local pid stat
@@ -25,11 +36,10 @@ if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
 else
   OCTOP_HOME="${OCTOP_HOME:-$HOME/.octop}"
   INSTALL_ROOT="/opt/octop-desktop"
-  DISPLAY_NUM=":99"
   if ! _xvnc_alive "Xvnc.*${DISPLAY_NUM}"; then
     rm -f "/tmp/.X${DISPLAY_NUM#:}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM#:}"
-    nohup "$(command -v Xvnc || command -v Xtigervnc)" :99 -depth 24 -geometry 1920x1080 -dpi 96 \
-      -rfbport 5900 -localhost yes -AlwaysShared -maxclients 256 -SecurityTypes VncAuth \
+    nohup "$(command -v Xvnc || command -v Xtigervnc)" "${DISPLAY_NUM}" -depth 24 -geometry 1920x1080 -dpi 96 \
+      -rfbport "${VNC_PORT}" -localhost yes -AlwaysShared -maxclients 256 -SecurityTypes VncAuth \
       -rfbauth /etc/octop-desktop/rfbauth \
       > "${OCTOP_HOME}/desktop/xvnc.log" 2>&1 &
     sleep 1

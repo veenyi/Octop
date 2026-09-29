@@ -10,10 +10,15 @@ fi
 
 INSTALL_ROOT="/opt/octop-desktop"
 CONF_DIR="/etc/octop-desktop"
-DISPLAY_NUM=":99"
 OCTOP_HOME="${OCTOP_HOME:-/root/.octop}"
 DESKTOP_STATE_DIR="${OCTOP_HOME}/desktop"
 DESKTOP_ENV="${DESKTOP_STATE_DIR}/desktop.env"
+if [ -f "$DESKTOP_ENV" ]; then
+  # shellcheck disable=SC1090
+  . "$DESKTOP_ENV"
+fi
+DISPLAY_NUM="${OCTOP_DESKTOP_DISPLAY:-:99}"
+VNC_PORT="${OCTOP_DESKTOP_VNC_PORT:-5900}"
 
 detect_xvnc_bin() {
   for p in /usr/bin/Xvnc /usr/bin/Xtigervnc; do
@@ -29,6 +34,7 @@ cat > "$DESKTOP_ENV" << EOF
 export DISPLAY=${DISPLAY_NUM}
 export OCTOP_DESKTOP_DISPLAY=${DISPLAY_NUM}
 export OCTOP_DESKTOP_GEOMETRY=${GEOMETRY}
+export OCTOP_DESKTOP_VNC_PORT=${VNC_PORT}
 EOF
 
 if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
@@ -48,12 +54,12 @@ fi
 pkill -f "xfce4-panel" 2>/dev/null || true
 pkill -f "xfdesktop" 2>/dev/null || true
 pkill -f "openbox --config-file ${INSTALL_ROOT}/openbox.xml" 2>/dev/null || true
-pkill -f "Xvnc.*:99" 2>/dev/null || true
-pkill -f "Xtigervnc.*:99" 2>/dev/null || true
-rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
+pkill -f "Xvnc.*${DISPLAY_NUM}" 2>/dev/null || true
+pkill -f "Xtigervnc.*${DISPLAY_NUM}" 2>/dev/null || true
+rm -f "/tmp/.X${DISPLAY_NUM#:}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM#:}"
 
 xvnc_bin=$(detect_xvnc_bin) || { echo "Xvnc not found" >&2; exit 1; }
-nohup "$xvnc_bin" :99 -depth 24 -geometry "${GEOMETRY}" -dpi 96 -rfbport 5900 \
+nohup "$xvnc_bin" "${DISPLAY_NUM}" -depth 24 -geometry "${GEOMETRY}" -dpi 96 -rfbport "${VNC_PORT}" \
   -localhost yes -AlwaysShared -maxclients 256 -SecurityTypes VncAuth \
   -rfbauth "${CONF_DIR}/rfbauth" \
   > "${DESKTOP_STATE_DIR}/xvnc.log" 2>&1 &

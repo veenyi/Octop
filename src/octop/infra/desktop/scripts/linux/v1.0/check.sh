@@ -9,7 +9,13 @@ set -uo pipefail
 
 CONF_DIR="/etc/octop-desktop"
 VERSION_FILE="${CONF_DIR}/version"
-DISPLAY_NUM=":99"
+DESKTOP_ENV="${OCTOP_HOME:-/root/.octop}/desktop/desktop.env"
+if [ -f "$DESKTOP_ENV" ]; then
+    # shellcheck disable=SC1090
+    . "$DESKTOP_ENV"
+fi
+DISPLAY_NUM="${OCTOP_DESKTOP_DISPLAY:-:99}"
+VNC_PORT="${OCTOP_DESKTOP_VNC_PORT:-5900}"
 
 vnc_running=false
 panel_running=false
@@ -33,7 +39,7 @@ fi
 if systemctl is-active --quiet octop-desktop-xvnc 2>/dev/null; then
     vnc_running=true
     mark xvnc ok
-elif pgrep -f "Xvnc.*:99" >/dev/null 2>&1 || pgrep -f "Xtigervnc.*:99" >/dev/null 2>&1; then
+elif pgrep -f "Xvnc.*${DISPLAY_NUM}" >/dev/null 2>&1 || pgrep -f "Xtigervnc.*${DISPLAY_NUM}" >/dev/null 2>&1; then
     vnc_running=true
     mark xvnc ok
 else
@@ -83,14 +89,14 @@ installed_version=$(cat "$VERSION_FILE" 2>/dev/null | tr -d '[:space:]' || echo 
 if [ "$vnc_running" = true ]; then
     vnc_localhost=true
     if command -v ss >/dev/null 2>&1; then
-        if ss -ltn "sport = :5900" 2>/dev/null | grep -qE '0\.0\.0\.0:5900|\*:5900|\[::\]:5900'; then
+        if ss -ltn "sport = :${VNC_PORT}" 2>/dev/null | grep -qE "0\.0\.0\.0:${VNC_PORT}|\*:${VNC_PORT}|\[::\]:${VNC_PORT}"; then
             vnc_localhost=false
             mark vnc_bind exposed
         else
             mark vnc_bind localhost
         fi
     elif command -v netstat >/dev/null 2>&1; then
-        if netstat -ltn 2>/dev/null | grep -E ':5900\b' | grep -qv '127.0.0.1:5900'; then
+        if netstat -ltn 2>/dev/null | grep -E ":${VNC_PORT}([^0-9]|$)" | grep -qv "127.0.0.1:${VNC_PORT}"; then
             vnc_localhost=false
             mark vnc_bind exposed
         else

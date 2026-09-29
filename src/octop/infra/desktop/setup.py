@@ -283,22 +283,20 @@ def _write_geometry_env(geometry: str) -> None:
     path = desktop_env_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     display = ":99"
+    vnc_port = _vnc_port_from_env_file()
     if path.is_file():
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
             if line.startswith("export DISPLAY=") or line.startswith("DISPLAY="):
                 display = line.split("=", 1)[1].strip().strip('"').strip("'")
                 break
-    path.write_text(
-        "\n".join(
-            [
-                f"export DISPLAY={display}",
-                f"export OCTOP_DESKTOP_DISPLAY={display}",
-                f"export OCTOP_DESKTOP_GEOMETRY={geometry}",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    lines = [
+        f"export DISPLAY={display}",
+        f"export OCTOP_DESKTOP_DISPLAY={display}",
+        f"export OCTOP_DESKTOP_GEOMETRY={geometry}",
+    ]
+    if vnc_port:
+        lines.append(f"export OCTOP_DESKTOP_VNC_PORT={vnc_port}")
+    path.write_text("\n".join([*lines, ""]), encoding="utf-8")
 
 
 def apply_geometry(geometry: str) -> None:
@@ -484,6 +482,18 @@ def _desktop_uninstall_succeeded() -> bool:
     return False
 
 
+def _vnc_port_from_env_file() -> int | None:
+    path = desktop_env_file()
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if line.startswith("export OCTOP_DESKTOP_VNC_PORT=") or line.startswith("OCTOP_DESKTOP_VNC_PORT="):
+                raw = line.split("=", 1)[1].strip().strip('"').strip("'")
+                if raw.isdigit():
+                    return int(raw)
+    return None
+
+
 def _xvnc_service_active() -> bool:
     if shutil.which("systemctl") and Path("/run/systemd/system").is_dir():
         try:
@@ -499,8 +509,13 @@ def _xvnc_service_active() -> bool:
             pass
 
     try:
+        display = (
+            os.environ.get("OCTOP_DESKTOP_DISPLAY", "").strip()
+            or _display_from_env_file()
+            or ":99"
+        )
         proc = subprocess.run(
-            ["pgrep", "-f", r"X(vnc|tigervnc).*:99"],
+            ["pgrep", "-f", rf"X(vnc|tigervnc).*{re.escape(display)}"],
             capture_output=True,
             timeout=3,
             check=False,

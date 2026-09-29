@@ -34,6 +34,75 @@ SVC_XVNC="octop-desktop-xvnc"
 SVC_OPENBOX="octop-desktop-openbox"
 SVC_SESSION="octop-desktop-session"
 
+# --- Display/VNC-port conflict avoidance -------------------------------------
+# Another app's remote-desktop stack may already own :99/5900 (e.g. a
+# third-party VNC service binding the same display and port). Resolve a
+# target that is either still owned by OUR xvnc unit (keep it stable across
+# restarts) or completely free, instead of hardcoding :99/5900.
+port_listen() {
+    local port="$1"
+    if command -v ss >/dev/null 2>&1; then
+        ss -ltn 2>/dev/null | grep -qE "[:.]${port}[[:space:]]" && return 0
+    elif command -v netstat >/dev/null 2>&1; then
+        netstat -ltn 2>/dev/null | grep -qE ":${port}([^0-9]|$)" && return 0
+    fi
+    return 1
+}
+
+display_busy() {
+    local n="$1"
+    [ -e "/tmp/.X11-unix/X${n}" ] && return 0
+    [ -e "/tmp/.X${n}-lock" ] && return 0
+    pgrep -f "(Xvnc|Xtigervnc|Xvfb|Xorg|x11vnc).*:${n}([^0-9]|$)" >/dev/null 2>&1 && return 0
+    return 1
+}
+
+resolve_display_and_port() {
+    local n="" port=""
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "${SVC_XVNC}" 2>/dev/null; then
+        # Our own xvnc unit is running: keep its configured target stable.
+        n=$(sed -n 's/^ExecStart=[^ ]*Xvnc :\([0-9]\{1,4\}\) .*/\1/p' "/etc/systemd/system/${SVC_XVNC}.service" 2>/dev/null | tail -1 || true)
+        port=$(sed -n 's/.*-rfbport \([0-9]\{4,5\}\) .*/\1/p' "/etc/systemd/system/${SVC_XVNC}.service" 2>/dev/null | tail -1 || true)
+        if [ -n "$n" ] && [ -n "$port" ]; then
+            DISPLAY_NUM=":${n}"
+            VNC_PORT="$port"
+            return 0
+        fi
+    fi
+    if [ -f "$DESKTOP_ENV" ]; then
+        # shellcheck disable=SC1090
+        n=$(sed -n 's/^export OCTOP_DESKTOP_DISPLAY=:\([0-9]\{1,4\}\)[[:space:]]*$/\1/p' "$DESKTOP_ENV" 2>/dev/null | tail -1 || true)
+        port=$(sed -n 's/^export OCTOP_DESKTOP_VNC_PORT=\([0-9]\{4,5\}\)[[:space:]]*$/\1/p' "$DESKTOP_ENV" 2>/dev/null | tail -1 || true)
+    fi
+    if [ -z "$n" ]; then
+        n="${OCTOP_DESKTOP_DISPLAY:-}"
+    fi
+    n="${n#:}"
+    if [ -z "$port" ]; then
+        port="${OCTOP_DESKTOP_VNC_PORT:-}"
+    fi
+    if [ -n "$n" ] && [ -n "$port" ] && ! display_busy "$n" && ! port_listen "$port"; then
+        DISPLAY_NUM=":${n}"
+        VNC_PORT="$port"
+        return 0
+    fi
+    if [ -z "$n" ] || display_busy "$n"; then
+        for n in $(seq 99 160); do
+            display_busy "$n" || break
+        done
+    fi
+    if [ -z "$port" ] || port_listen "$port"; then
+        for port in $(seq 5900 5999); do
+            port_listen "$port" || break
+        done
+    fi
+    DISPLAY_NUM=":${n}"
+    VNC_PORT="$port"
+    return 0
+}
+
+resolve_display_and_port
+
 START_OPENBOX_SH="${INSTALL_ROOT}/start-openbox.sh"
 START_SESSION_SH="${INSTALL_ROOT}/start-session.sh"
 OPENBOX_XML="${INSTALL_ROOT}/openbox.xml"
@@ -385,7 +454,7 @@ set -euo pipefail
 export HOME=/root
 export XDG_CONFIG_HOME=/root/.config
 export XDG_DATA_HOME=/root/.local/share
-export DISPLAY="${DISPLAY:-:99}"
+export DISPLAY="${OCTOP_DESKTOP_DISPLAY:-${DISPLAY:-:99}}"
 NO_START=false
 if [ "${1:-}" = "--no-start" ]; then
     NO_START=true
@@ -767,7 +836,7 @@ SCRIPT_EOF
     cat > "$APPLY_WALLPAPER_SH" << 'APPLY_EOF'
 #!/bin/bash
 set -euo pipefail
-export DISPLAY="${DISPLAY:-:99}"
+export DISPLAY="${OCTOP_DESKTOP_DISPLAY:-${DISPLAY:-:99}}"
 export HOME="${HOME:-/root}"
 export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-/root/.config}"
 [ -f /tmp/octop-desktop-dbus-env ] && source /tmp/octop-desktop-dbus-env || true
@@ -824,7 +893,7 @@ LOG="${INSTALL_ROOT}/apply-icons.log"
 exec >>"\$LOG" 2>&1
 echo "---- \$(date -Is) apply-icon-size ----"
 
-export DISPLAY="\${DISPLAY:-:99}"
+export DISPLAY="\${OCTOP_DESKTOP_DISPLAY:-\${DISPLAY:-:99}}"
 export HOME="\${HOME:-/root}"
 export XDG_CONFIG_HOME="\${XDG_CONFIG_HOME:-/root/.config}"
 
@@ -905,21 +974,21 @@ ICONS_EOF
 
     cat > "$START_OPENBOX_SH" << 'SCRIPT_EOF'
 #!/bin/bash
-export DISPLAY=:99 HOME=/root XDG_RUNTIME_DIR=/tmp/runtime-octop-desktop
+export DISPLAY="${OCTOP_DESKTOP_DISPLAY:-:99}" HOME=/root XDG_RUNTIME_DIR=/tmp/runtime-octop-desktop
 export XDG_CONFIG_HOME=/root/.config XDG_DATA_HOME=/root/.local/share XDG_CURRENT_DESKTOP="XFCE"
 export LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8 LANGUAGE=zh_CN:zh
 mkdir -p "$XDG_RUNTIME_DIR" "$HOME/Desktop"; chmod 700 "$XDG_RUNTIME_DIR"
-for i in $(seq 1 100); do xdpyinfo -display :99 >/dev/null 2>&1 && break; sleep 0.3; done
+for i in $(seq 1 100); do xdpyinfo -display "$DISPLAY" >/dev/null 2>&1 && break; sleep 0.3; done
 for i in $(seq 1 50); do
     [ -f /tmp/octop-desktop-dbus-env ] && { source /tmp/octop-desktop-dbus-env; [ -n "$DBUS_SESSION_BUS_ADDRESS" ] && break; }
     sleep 0.3
 done
-xset -display :99 s off s noblank s 0 0 2>/dev/null || true
-xset -display :99 dpms 0 0 0 2>/dev/null || true
-xset -display :99 -dpms 2>/dev/null || true
-xfsettingsd --display=:99 --replace &>/dev/null &
+xset -display "$DISPLAY" s off s noblank s 0 0 2>/dev/null || true
+xset -display "$DISPLAY" dpms 0 0 0 2>/dev/null || true
+xset -display "$DISPLAY" -dpms 2>/dev/null || true
+xfsettingsd --display="$DISPLAY" --replace &>/dev/null &
 sleep 0.5
-command -v xfdesktop >/dev/null 2>&1 && xfdesktop --display=:99 &>/dev/null &
+command -v xfdesktop >/dev/null 2>&1 && xfdesktop --display="$DISPLAY" &>/dev/null &
 sleep 1
 # Seed panel once after xfsettingsd is up. ensure-panel SIGKILLs the panel and
 # restarts xfconfd so our XML wins over any stale in-memory channel.
@@ -928,7 +997,7 @@ if [ -x /opt/octop-desktop/ensure-panel.sh ]; then
 else
     pkill -9 -x xfce4-panel >/dev/null 2>&1 || true
     sleep 0.2
-    xfce4-panel --display=:99 &>/dev/null &
+    xfce4-panel --display="$DISPLAY" &>/dev/null &
 fi
 command -v fcitx5 >/dev/null 2>&1 && fcitx5 -d &>/dev/null &
 (
@@ -941,7 +1010,7 @@ command -v fcitx5 >/dev/null 2>&1 && fcitx5 -d &>/dev/null &
         /opt/octop-desktop/ensure-panel.sh || true
     fi
     for i in $(seq 1 40); do
-        pgrep -f "xfdesktop --display=:99" >/dev/null 2>&1 && break
+        pgrep -f "xfdesktop --display="$DISPLAY"" >/dev/null 2>&1 && break
         sleep 0.5
     done
     [ -x /opt/octop-desktop/apply-wallpaper.sh ] && /opt/octop-desktop/apply-wallpaper.sh
@@ -952,8 +1021,8 @@ command -v fcitx5 >/dev/null 2>&1 && fcitx5 -d &>/dev/null &
         xfconf-query -c xfce4-screensaver -p /screensaver/enabled --create -t bool -s false 2>/dev/null || true
         xfconf-query -c xfce4-screensaver -p /lock/enabled --create -t bool -s false 2>/dev/null || true
         xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-enabled --create -t bool -s false 2>/dev/null || true
-        xset -display :99 s off s noblank s 0 0 2>/dev/null || true
-        xset -display :99 -dpms 2>/dev/null || true
+        xset -display "$DISPLAY" s off s noblank s 0 0 2>/dev/null || true
+        xset -display "$DISPLAY" -dpms 2>/dev/null || true
     fi
     [ -x /opt/octop-desktop/trust-desktop-icons.sh ] && /opt/octop-desktop/trust-desktop-icons.sh
 ) &>/dev/null &
@@ -983,8 +1052,8 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStartPre=-/bin/rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
-ExecStart=${xvnc_bin} :99 -depth 24 -geometry ${GEOMETRY} -dpi ${VNC_DPI} -rfbport ${VNC_PORT} ${localhost_args} -AlwaysShared -maxclients 256 -SecurityTypes VncAuth -rfbauth ${CONF_DIR}/rfbauth
+ExecStartPre=-/bin/rm -f /tmp/.X${DISPLAY_NUM#:}-lock /tmp/.X11-unix/X${DISPLAY_NUM#:}
+ExecStart=${xvnc_bin} ${DISPLAY_NUM} -depth 24 -geometry ${GEOMETRY} -dpi ${VNC_DPI} -rfbport ${VNC_PORT} ${localhost_args} -AlwaysShared -maxclients 256 -SecurityTypes VncAuth -rfbauth ${CONF_DIR}/rfbauth
 Restart=on-failure
 RestartSec=2
 
@@ -1000,6 +1069,7 @@ Wants=${SVC_XVNC}.service
 
 [Service]
 Type=simple
+Environment=OCTOP_DESKTOP_DISPLAY=${DISPLAY_NUM}
 ExecStart=${START_SESSION_SH}
 Restart=on-failure
 RestartSec=2
@@ -1016,6 +1086,7 @@ Wants=${SVC_XVNC}.service
 
 [Service]
 Type=simple
+Environment=OCTOP_DESKTOP_DISPLAY=${DISPLAY_NUM}
 ExecStart=${START_OPENBOX_SH}
 Restart=on-failure
 RestartSec=2
@@ -1035,6 +1106,7 @@ write_desktop_env() {
 export DISPLAY=${DISPLAY_NUM}
 export OCTOP_DESKTOP_DISPLAY=${DISPLAY_NUM}
 export OCTOP_DESKTOP_GEOMETRY=${GEOMETRY}
+export OCTOP_DESKTOP_VNC_PORT=${VNC_PORT}
 EOF
     chmod 644 "$DESKTOP_ENV"
 }
@@ -1057,12 +1129,12 @@ start_services() {
 
     # Fallback for containers / environments without systemd.
     mkdir -p "${DESKTOP_STATE_DIR}/pids"
-    pkill -f "Xtigervnc :99" 2>/dev/null || true
-    pkill -f "Xvnc :99" 2>/dev/null || true
+    pkill -f "Xtigervnc ${DISPLAY_NUM}" 2>/dev/null || true
+    pkill -f "Xvnc ${DISPLAY_NUM}" 2>/dev/null || true
     pkill -f "xfce4-panel" 2>/dev/null || true
     pkill -f "xfdesktop" 2>/dev/null || true
     pkill -f "openbox --config-file ${OPENBOX_XML}" 2>/dev/null || true
-    rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
+    rm -f "/tmp/.X${DISPLAY_NUM#:}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM#:}"
 
     local xvnc_bin
     xvnc_bin=$(detect_xvnc_bin) || fail "Xvnc not found"
@@ -1075,7 +1147,7 @@ start_services() {
     chmod 600 "${CONF_DIR}/rfbauth"
 
     # shellcheck disable=SC2086
-    nohup "$xvnc_bin" :99 -depth 24 -geometry "${GEOMETRY}" -dpi "${VNC_DPI}" -rfbport "${VNC_PORT}" \
+    nohup "$xvnc_bin" "${DISPLAY_NUM}" -depth 24 -geometry "${GEOMETRY}" -dpi "${VNC_DPI}" -rfbport "${VNC_PORT}" \
         ${localhost_args} -AlwaysShared -maxclients 256 -SecurityTypes VncAuth -rfbauth "${CONF_DIR}/rfbauth" \
         > "${DESKTOP_STATE_DIR}/xvnc.log" 2>&1 &
     echo $! > "${DESKTOP_STATE_DIR}/pids/xvnc.pid"
