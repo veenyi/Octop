@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
 from octop.infra.setup.self_update import is_newer, parse_version
 
 
