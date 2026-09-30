@@ -57,7 +57,7 @@ def test_write_geometry_env_without_port(tmp_path: Path, monkeypatch: pytest.Mon
 def test_xvnc_service_active_uses_configured_display(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    env_file = _write_env(tmp_path, "export OCTOP_DESKTOP_DISPLAY=:100\n")
+    env_file = _write_env(tmp_path, "export DISPLAY=:100\nexport OCTOP_DESKTOP_DISPLAY=:100\nexport OCTOP_DESKTOP_VNC_PORT=5901\n")
     monkeypatch.setattr(desktop_setup, "desktop_env_file", lambda: env_file)
     monkeypatch.delenv("OCTOP_DESKTOP_DISPLAY", raising=False)
     seen: dict[str, object] = {}
@@ -81,7 +81,7 @@ def test_xvnc_service_active_uses_configured_display(
 def test_xvnc_service_active_systemctl_short_circuit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    env_file = _write_env(tmp_path, "export OCTOP_DESKTOP_DISPLAY=:100\n")
+    env_file = _write_env(tmp_path, "export DISPLAY=:100\nexport OCTOP_DESKTOP_DISPLAY=:100\nexport OCTOP_DESKTOP_VNC_PORT=5901\n")
     monkeypatch.setattr(desktop_setup, "desktop_env_file", lambda: env_file)
     monkeypatch.setattr(
         desktop_setup.shutil,
