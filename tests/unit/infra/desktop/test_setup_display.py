@@ -70,7 +70,35 @@ def test_xvnc_service_active_uses_configured_display(
         return _Result()
 
     monkeypatch.setattr(desktop_setup.subprocess, "run", fake_run)
+
+    monkeypatch.setattr(desktop_setup.shutil, "which", lambda name: None)
     assert desktop_setup._xvnc_service_active() is True
     cmd = seen["cmd"]
     assert isinstance(cmd, list) and cmd[0] == "pgrep"
     assert cmd[2] == "X(vnc|tigervnc).*:100"
+
+
+def test_xvnc_service_active_systemctl_short_circuit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env_file = _write_env(tmp_path, "export OCTOP_DESKTOP_DISPLAY=:100\n")
+    monkeypatch.setattr(desktop_setup, "desktop_env_file", lambda: env_file)
+    monkeypatch.setattr(
+        desktop_setup.shutil,
+        "which",
+        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
+    )
+    monkeypatch.setattr(desktop_setup.Path, "is_dir", lambda self: True)
+    seen: dict[str, object] = {}
+
+    class _Result:
+        returncode = 0
+
+    def fake_run(cmd: list[str], **kwargs: object) -> _Result:
+        seen["cmd"] = cmd
+        return _Result()
+
+    monkeypatch.setattr(desktop_setup.subprocess, "run", fake_run)
+    assert desktop_setup._xvnc_service_active() is True
+    cmd = seen["cmd"]
+    assert isinstance(cmd, list) and cmd[:3] == ["systemctl", "is-active", "--quiet"]
