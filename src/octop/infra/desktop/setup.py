@@ -308,7 +308,10 @@ def apply_geometry(geometry: str) -> None:
         if geteuid() == 0:
             cmd = ["/bin/bash", str(resize_script), geometry]
         elif shutil.which("sudo"):
-            cmd = ["sudo", "-n", "/bin/bash", str(resize_script), geometry]
+            cmd = [
+                "sudo", "-n", "/usr/bin/env", f"OCTOP_HOME={octop_home()}",
+                "/bin/bash", str(resize_script), geometry,
+            ]
         else:
             raise PermissionError("root or passwordless sudo required to change desktop geometry")
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
@@ -324,7 +327,10 @@ def apply_geometry(geometry: str) -> None:
     cmd = (
         ["/bin/bash", str(start_script)]
         if geteuid() == 0
-        else ["sudo", "-n", "/bin/bash", str(start_script)]
+        else [
+            "sudo", "-n", "/usr/bin/env", f"OCTOP_HOME={octop_home()}",
+            "/bin/bash", str(start_script),
+        ]
     )
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
     if proc.returncode != 0:
@@ -526,7 +532,7 @@ def _xvnc_service_active() -> bool:
 
 
 def _check_vnc_localhost(*, locale: str = "en") -> tuple[bool | None, str]:
-    bound = vnc_listens_localhost_only()
+    bound = vnc_listens_localhost_only(_vnc_port_from_env_file() or _DEFAULT_VNC_PORT)
     if bound is False:
         return False, _install_log(locale, "error_vnc_exposed")
     return bound, ""
@@ -557,7 +563,7 @@ def _resolve_linux_setup(*, locale: str = "en") -> tuple[SetupState, str | None,
 
     if _virtual_desktop_installed():
         if _xvnc_service_active():
-            display = display or ":99"
+            display = display or _display_from_env_file() or ":99"
             if _display_usable(display):
                 if vnc_local is False:
                     return "needs_start", display, vnc_reason, vnc_local
@@ -852,7 +858,11 @@ def _install_cmd_for_script(script: Path, *script_args: str) -> list[str] | None
     if geteuid() == 0:
         return ["/bin/bash", str(script), *script_args]
     if shutil.which("sudo"):
-        return ["sudo", "-n", "/bin/bash", str(script), *script_args]
+        # sudo 的 env_reset 会丢弃 OCTOP_HOME,必须经命令参数显式带给脚本
+        return [
+            "sudo", "-n", "/usr/bin/env", f"OCTOP_HOME={octop_home()}",
+            "/bin/bash", str(script), *script_args,
+        ]
     return None
 
 

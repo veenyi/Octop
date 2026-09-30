@@ -102,3 +102,34 @@ def test_xvnc_service_active_systemctl_short_circuit(
     assert desktop_setup._xvnc_service_active() is True
     cmd = seen["cmd"]
     assert isinstance(cmd, list) and cmd[:3] == ["systemctl", "is-active", "--quiet"]
+
+
+def test_install_cmd_passes_octop_home_through_sudo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(desktop_setup, "octop_home", lambda: Path("/home/octop-native/.octop"))
+    monkeypatch.setattr(desktop_setup, "geteuid", lambda: 1000)
+    monkeypatch.setattr(desktop_setup.shutil, "which", lambda name: "/usr/bin/sudo" if name == "sudo" else None)
+    cmd = desktop_setup._install_cmd_for_script(Path("/opt/x/install.sh"))
+    assert cmd is not None
+    assert cmd[:5] == ["sudo", "-n", "/usr/bin/env", "OCTOP_HOME=/home/octop-native/.octop", "/bin/bash"]
+
+    monkeypatch.setattr(desktop_setup, "geteuid", lambda: 0)
+    cmd_root = desktop_setup._install_cmd_for_script(Path("/opt/x/install.sh"))
+    assert cmd_root == ["/bin/bash", "/opt/x/install.sh"]
+
+
+def test_check_vnc_localhost_uses_configured_port(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env_file = _write_env(tmp_path, "export DISPLAY=:100\nexport OCTOP_DESKTOP_VNC_PORT=5901\n")
+    monkeypatch.setattr(desktop_setup, "desktop_env_file", lambda: env_file)
+    calls: list[int] = []
+
+    def fake_probe(port: int) -> bool:
+        calls.append(port)
+        return True
+
+    monkeypatch.setattr(desktop_setup, "vnc_listens_localhost_only", fake_probe)
+    assert desktop_setup._check_vnc_localhost() == (True, "")
+    assert calls == [5901]
