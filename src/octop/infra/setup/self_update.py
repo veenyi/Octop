@@ -116,6 +116,48 @@ def find_uv_executable() -> str:
             return candidate
     return "uv"
 
+def bootstrap_uv(python_exe: str | None = None, *, timeout: int = 300) -> str | None:
+    """Best-effort user-level install of uv when it is missing.
+
+    FPK services run as a non-root user, so a root-only launcher guard never
+    fires and upgrades fall back to pip, whose resolver can stall on the full
+    "octop-harness[all]" dependency tree. Installs through "pip --user" (the
+    binary lands in "~/.local/bin", which detect_installer() searches), trying
+    the mirror list first because direct pypi.org access is unavailable on some
+    networks. Returns the uv executable path, or None when the caller must fall
+    back to pip.
+    """
+    if detect_installer() == "uv":
+        return find_uv_executable()
+    exe = python_exe or sys.executable
+    # Externally-managed environments (Debian/Ubuntu system Python) reject
+    # --user installs unless --break-system-packages is given; older pips do
+    # not know the flag, so try both variants per index.
+    user_variants = [["--user", "--break-system-packages"], ["--user"]]
+    for index in [*_MIRRORS, _PYPI_SIMPLE]:
+        for extra in user_variants:
+            cmd = [exe, "-m", "pip", "install", "-q", "--disable-pip-version-check", *extra, "uv"]
+            if index:
+                cmd.extend(["-i", index])
+            try:
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=timeout, check=False
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                logger.info("uv bootstrap via %s failed: %s", index or "pypi.org", exc)
+                continue
+            if result.returncode != 0:
+                snippet = (result.stderr or result.stdout or "")[:200]
+                logger.info("uv bootstrap via %s failed: %s", index or "pypi.org", snippet)
+                continue
+            if detect_installer() == "uv":
+                logger.info("uv bootstrapped via %s", index or "pypi.org")
+                return find_uv_executable()
+    logger.warning("uv bootstrap failed on all indexes; falling back to pip")
+    return None
+
+
+
 
 def get_local_version() -> str:
     try:
@@ -726,6 +768,70 @@ def _verify_fpk_upgrade(
     )
 
 
+def _fpk_manifest_path() -> Path | None:
+    """Return the app-center manifest path for this FPK install, if present."""
+    root = (os.environ.get("TRIM_APPDEST") or "").strip()
+    if not root:
+        return None
+    path = Path(root) / "manifest"
+    return path if path.is_file() else None
+
+
+def refresh_fpk_manifest_version(version: str, *, use_sudo: bool = True) -> bool:
+    """Sync the app-center manifest version after a successful in-app upgrade.
+
+    The app-center UI reads "version" from "$TRIM_APPDEST/manifest"; without
+    this refresh the UI keeps showing the bundled version even though the
+    running code was upgraded. The manifest is root-owned, so the service user
+    cannot write it directly -- use passwordless sudo when available (the FPK
+    installer already grants the app user NOPASSWD for its callbacks) and never
+    fail the upgrade itself on error.
+    """
+    path = _fpk_manifest_path()
+    if path is None or not version:
+        return False
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        logger.info("manifest refresh skipped (unreadable): %s", exc)
+        return False
+    if not re.search(r"(?m)^[ \t]*version[ \t]*=", text):
+        logger.info("manifest refresh skipped: no version line in %s", path)
+        return False
+    # fnOS manifests pad the key ("version               = 1.0.2b5"); keep the
+    # original key spelling and replace only the value.
+    if re.search(r"(?m)^[ \t]*version[ \t]*=[ \t]*" + re.escape(version) + r"[ \t]*$", text):
+        return True
+    new_text = re.sub(
+        r"(?m)^([ \t]*version[ \t]*=[ \t]*).*$",
+        lambda m: m.group(1) + version,
+        text,
+        count=1,
+    )
+    commands: list[list[str]] = []
+    if use_sudo and shutil.which("sudo"):
+        commands.append(["sudo", "-n", "tee", str(path)])
+    commands.append(["tee", str(path)])
+    for cmd in commands:
+        try:
+            result = subprocess.run(
+                cmd,
+                input=new_text,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logger.info("manifest refresh via %s failed: %s", cmd[0], exc)
+            continue
+        if result.returncode == 0:
+            logger.info("app-center manifest version refreshed to %s", version)
+            return True
+        logger.info("manifest refresh via %s failed: %s", cmd[0], (result.stderr or "")[:200])
+    return False
+
+
 def _run_fpk_upgrade(
     site_packages: str,
     *,
@@ -751,7 +857,11 @@ def _run_fpk_upgrade(
     local_ver = get_local_version()
     ordered, mirror_errors = rank_install_indexes(version)
     python_exe = sys.executable
-    installer = detect_installer()  # uv 优先：pip 对 octop-harness[all] 依赖树解析会卡死
+    # uv 优先：pip 对 octop-harness[all] 依赖树解析会卡死。服务以非 root 用户
+    # 运行，launcher 里的 root-only 引导不会触发，这里补一次用户级引导。
+    if detect_installer() != "uv":
+        bootstrap_uv(python_exe)
+    installer = detect_installer()
 
     def _build_cmd(index_url: str) -> list[str]:
         requirement = package_requirement(version)
@@ -801,6 +911,9 @@ def _run_fpk_upgrade(
             continue
         res = _verify_fpk_upgrade(local_ver, site_packages, python_exe, mirror_errors)
         if res.success:
+            if res.installed_version:
+                # 应用中心读的是 manifest 里的版本号；不回写则前端永远显示旧版
+                refresh_fpk_manifest_version(res.installed_version)
             return res
         # 镜像装到了同版本/旧版（同步滞后）：继续尝试下一个镜像
         mirror_errors.append(f"{label}: {res.error or 'version unchanged'}")

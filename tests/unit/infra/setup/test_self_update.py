@@ -9,6 +9,8 @@ import pytest
 from octop.infra.setup.self_update import (
     UpgradeResult,
     _all_mirrors_failed,
+    _fpk_manifest_path,
+    bootstrap_uv,
     build_upgrade_command,
     index_label,
     is_newer,
@@ -18,6 +20,7 @@ from octop.infra.setup.self_update import (
     pick_latest_versions,
     probe_index,
     rank_install_indexes,
+    refresh_fpk_manifest_version,
     restore_console_scripts,
     run_upgrade,
     stash_console_scripts,
@@ -330,3 +333,215 @@ def test_run_managed_upgrade_uses_ranked_indexes(
     assert calls == ["fast.example", "pypi.org"]
     assert "slow.example: missing_version 1.0.1" in (result.mirror_errors or [])
     assert any("fast.example" in err for err in (result.mirror_errors or []))
+
+
+def test_bootstrap_uv_returns_existing_uv(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from octop.infra.setup import self_update
+
+    monkeypatch.setattr(self_update, "detect_installer", lambda: "uv")
+    monkeypatch.setattr(self_update, "find_uv_executable", lambda: "/home/u/.local/bin/uv")
+    assert bootstrap_uv() == "/home/u/.local/bin/uv"
+
+
+def test_bootstrap_uv_installs_then_reports_uv(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from octop.infra.setup import self_update
+
+    state = {"uv": False}
+    seen: list[list[str]] = []
+
+    def fake_detect() -> str:
+        return "uv" if state["uv"] else "pip"
+
+    def fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        seen.append(cmd)
+        state["uv"] = True
+
+        class R:
+            returncode = 0
+            stderr = ""
+            stdout = ""
+
+        return R()
+
+    monkeypatch.setattr(self_update, "detect_installer", fake_detect)
+    monkeypatch.setattr(self_update, "find_uv_executable", lambda: "/home/u/.local/bin/uv")
+    monkeypatch.setattr(self_update.subprocess, "run", fake_run)
+
+    assert bootstrap_uv("/usr/bin/python3") == "/home/u/.local/bin/uv"
+    assert seen, "expected a pip install attempt"
+    assert "--break-system-packages" in seen[0]
+    assert "--user" in seen[0]
+    assert "-i" in seen[0]
+
+
+def test_bootstrap_uv_gives_up_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from octop.infra.setup import self_update
+
+    monkeypatch.setattr(self_update, "detect_installer", lambda: "pip")
+
+    class R:
+        returncode = 1
+        stderr = "boom"
+        stdout = ""
+
+    monkeypatch.setattr(self_update.subprocess, "run", lambda *a, **k: R())
+    assert bootstrap_uv("/usr/bin/python3") is None
+
+
+def test_fpk_manifest_path_requires_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("TRIM_APPDEST", raising=False)
+    assert _fpk_manifest_path() is None
+
+
+def test_refresh_fpk_manifest_rewrites_padded_version(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from octop.infra.setup import self_update
+
+    manifest = tmp_path / "manifest"
+    manifest.write_text(
+        "appname               = octop-native\n"
+        "version               = 1.0.2b5\n"
+        "display_name          = OCTOP\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TRIM_APPDEST", str(tmp_path))
+    writes: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        writes.append(cmd)
+        manifest.write_text(kwargs.get("input", ""), encoding="utf-8")
+
+        class R:
+            returncode = 0
+            stderr = ""
+
+        return R()
+
+    monkeypatch.setattr(self_update.subprocess, "run", fake_run)
+    assert refresh_fpk_manifest_version("1.0.2b6", use_sudo=False) is True
+    text = manifest.read_text(encoding="utf-8")
+    assert "version               = 1.0.2b6" in text
+    assert "appname               = octop-native" in text
+    assert "display_name          = OCTOP" in text
+
+
+def test_refresh_fpk_manifest_idempotent_when_already_synced(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from octop.infra.setup import self_update
+
+    manifest = tmp_path / "manifest"
+    manifest.write_text("version               = 1.0.2b6\n", encoding="utf-8")
+    monkeypatch.setenv("TRIM_APPDEST", str(tmp_path))
+
+    def boom(*a, **k):  # type: ignore[no-untyped-def]
+        raise AssertionError("must not write when already up to date")
+
+    monkeypatch.setattr(self_update.subprocess, "run", boom)
+    assert refresh_fpk_manifest_version("1.0.2b6", use_sudo=False) is True
+
+
+def test_refresh_fpk_manifest_no_version_line_returns_false(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from octop.infra.setup import self_update
+
+    manifest = tmp_path / "manifest"
+    manifest.write_text("appname = octop-native\n", encoding="utf-8")
+    monkeypatch.setenv("TRIM_APPDEST", str(tmp_path))
+    assert refresh_fpk_manifest_version("1.0.2b6", use_sudo=False) is False
+
+
+def test_run_fpk_upgrade_bootstraps_uv_and_refreshes_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from octop.infra.setup import self_update
+
+    site = tmp_path / "site-packages"
+    site.mkdir()
+    bootstrapped: list[str] = []
+    refreshed: list[str] = []
+    state = {"uv": False}
+
+    monkeypatch.setattr(self_update, "get_local_version", lambda: "1.0.2b5")
+    monkeypatch.setattr(
+        self_update,
+        "rank_install_indexes",
+        lambda version, probe_timeout=8: ([("https://pypi.org/simple", "pypi.org")], []),
+    )
+    monkeypatch.setattr(self_update, "detect_installer", lambda: "uv" if state["uv"] else "pip")
+
+    def fake_bootstrap(python_exe=None, **kwargs):  # type: ignore[no-untyped-def]
+        bootstrapped.append(python_exe or "")
+        state["uv"] = True
+        return "/home/u/.local/bin/uv"
+
+    monkeypatch.setattr(self_update, "bootstrap_uv", fake_bootstrap)
+    monkeypatch.setattr(self_update, "find_uv_executable", lambda: "/home/u/.local/bin/uv")
+    monkeypatch.setattr(self_update, "_run_install_cmd", lambda *a, **k: (0, ""))
+    monkeypatch.setattr(
+        self_update,
+        "_verify_fpk_upgrade",
+        lambda local, sp, py, errs: UpgradeResult(
+            success=True, installed_version="1.0.2b6", mirror_errors=errs
+        ),
+    )
+    monkeypatch.setattr(
+        self_update,
+        "refresh_fpk_manifest_version",
+        lambda version, **k: refreshed.append(version) or True,
+    )
+
+    result = self_update._run_fpk_upgrade(str(site))
+    assert result.success is True
+    assert bootstrapped, "uv bootstrap should run when uv is absent"
+    assert refreshed == ["1.0.2b6"], "manifest refreshed to the installed version"
+
+
+def test_run_fpk_upgrade_skips_bootstrap_when_uv_present(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from octop.infra.setup import self_update
+
+    site = tmp_path / "site-packages"
+    site.mkdir()
+
+    monkeypatch.setattr(self_update, "get_local_version", lambda: "1.0.2b5")
+    monkeypatch.setattr(
+        self_update,
+        "rank_install_indexes",
+        lambda version, probe_timeout=8: ([("https://pypi.org/simple", "pypi.org")], []),
+    )
+    monkeypatch.setattr(self_update, "detect_installer", lambda: "uv")
+
+    def boom(*a, **k):  # type: ignore[no-untyped-def]
+        raise AssertionError("bootstrap must not run when uv already exists")
+
+    monkeypatch.setattr(self_update, "bootstrap_uv", boom)
+    monkeypatch.setattr(self_update, "find_uv_executable", lambda: "/home/u/.local/bin/uv")
+    monkeypatch.setattr(self_update, "_run_install_cmd", lambda *a, **k: (0, ""))
+    monkeypatch.setattr(
+        self_update,
+        "_verify_fpk_upgrade",
+        lambda local, sp, py, errs: UpgradeResult(
+            success=True, installed_version="1.0.2b6", mirror_errors=errs
+        ),
+    )
+    monkeypatch.setattr(self_update, "refresh_fpk_manifest_version", lambda *a, **k: True)
+
+    result = self_update._run_fpk_upgrade(str(site))
+    assert result.success is True
